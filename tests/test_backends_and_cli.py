@@ -126,3 +126,26 @@ def test_piping_into_head_does_not_traceback(repo, monkeypatch, capsys):
         assert cli.main(["-C", str(root), "status"]) == 0
     finally:
         monkeypatch.setattr("builtins.print", real_print)
+
+
+def test_global_flags_work_on_either_side_of_the_subcommand(repo, capsys):
+    """`fyc index --provider hash` is what people type; it used to exit 2."""
+    root = repo(FILES)
+
+    assert cli.main(["-C", str(root), "--provider", "hash", "index", "-q"]) == 0
+    capsys.readouterr()
+    assert cli.main(["index", "-C", str(root), "--provider", "hash", "-q"]) == 0
+    capsys.readouterr()
+
+    assert cli.main(["find", "verify password", "-C", str(root), "-f", "files"]) == 0
+    assert "auth/login.py" in capsys.readouterr().out
+
+    # the value given before the verb must survive the subparser's defaults
+    assert cli.main(["-C", str(root), "--provider", "hash", "status"]) == 0
+    assert "hash:hash-384" in capsys.readouterr().out
+
+
+def test_an_unknown_model_is_a_message_not_a_traceback(repo, capsys):
+    root = repo(FILES)
+    with pytest.raises(SystemExit):
+        cli.main(["-C", str(root), "--provider", "local", "--model", "no-such-model", "index"])

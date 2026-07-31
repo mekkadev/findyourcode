@@ -29,6 +29,7 @@ def main() -> int:
     parser.add_argument("--cases", type=Path, default=DEFAULT_CASES)
     parser.add_argument("--workdir", type=Path, default=Path("/tmp/fyc-benchmark"))
     parser.add_argument("--model", default="", help="embedding model to pass to `fyc index`")
+    parser.add_argument("--provider", default="", help="embedding provider (default: configured)")
     parser.add_argument("--keep", action="store_true", help="reuse an existing copy of the corpus")
     args = parser.parse_args()
 
@@ -48,14 +49,17 @@ def main() -> int:
         print(f"copying {corpus} -> {target}")
         shutil.copytree(corpus, target, ignore=shutil.ignore_patterns("__pycache__"))
 
-    index = ["index", "--reindex"] + (["--model", args.model] if args.model else [])
+    globals_ = (["--provider", args.provider] if args.provider else []) + (
+        ["--model", args.model] if args.model else []
+    )
+    index = [*globals_, "index", "--reindex"]
     first = timed(target, index, "first index")
-    again = timed(target, ["index"], "re-index, nothing changed")
+    again = timed(target, [*globals_, "index"], "re-index, nothing changed")
 
     print()
-    run(target, ["eval", str(args.cases.resolve())])
+    run(target, [*globals_, "eval", str(args.cases.resolve())])
     print()
-    run(target, ["eval", str(args.cases.resolve()), "--sweep"])
+    run(target, [*globals_, "eval", str(args.cases.resolve()), "--sweep"])
 
     db = target / ".findyourcode" / "index.db"
     print(f"\nindex on disk   {db.stat().st_size / 1e6:.0f} mb")

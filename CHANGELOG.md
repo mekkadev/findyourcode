@@ -34,6 +34,12 @@ notable changes, newest first. semver.
 
 ### fixed
 
+- `fyc index --provider voyage` and `fyc index --model ...` — both documented in
+  the readme — exited 2 with "unrecognized arguments", because the global flags
+  only parsed before the subcommand. either order works now, and a value given
+  before the verb is no longer erased by the subparser's defaults.
+- a model name the provider cannot load printed a traceback instead of the
+  message inside it.
 - a filter cost a full brute-force scan of everything it matched: `--lang python`
   on the stdlib index took 0.36s against 0.06s unfiltered. the vector index is
   asked first now and the scan only runs when the approximate answer cannot fill

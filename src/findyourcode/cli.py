@@ -56,6 +56,7 @@ def _build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command")
 
     index = sub.add_parser("index", help="build or update the index")
+    _add_global_options(index)
     index.add_argument("--reindex", action="store_true", help="drop the index and start over")
     index.add_argument("--workers", type=int, help="parser threads")
     index.add_argument("--watch", action="store_true", help="keep the index fresh until Ctrl-C")
@@ -64,6 +65,7 @@ def _build_parser() -> argparse.ArgumentParser:
     index.set_defaults(handler=cmd_index)
 
     find = sub.add_parser("find", help="search the index")
+    _add_global_options(find)
     find.add_argument("query", nargs="+")
     _add_result_options(find)
     find.add_argument("--mode", choices=["hybrid", "semantic", "lexical"], default="hybrid")
@@ -78,6 +80,7 @@ def _build_parser() -> argparse.ArgumentParser:
     find.set_defaults(handler=cmd_find)
 
     similar = sub.add_parser("similar", help="find code similar to a place in the codebase")
+    _add_global_options(similar)
     similar.add_argument("location", help="path or path:line")
     similar.add_argument(
         "--same-file", action="store_true", help="also return chunks from the same file"
@@ -86,6 +89,7 @@ def _build_parser() -> argparse.ArgumentParser:
     similar.set_defaults(handler=cmd_similar)
 
     ev = sub.add_parser("eval", help="measure ranking quality on a file of cases")
+    _add_global_options(ev)
     ev.add_argument("cases", help='JSON file: [{"query": "...", "expect": "path/part"}]')
     ev.add_argument("-n", "--limit", type=int, default=10)
     ev.add_argument("--mode", choices=["hybrid", "semantic", "lexical"], default="hybrid")
@@ -100,20 +104,36 @@ def _build_parser() -> argparse.ArgumentParser:
     ev.set_defaults(handler=cmd_eval)
 
     status = sub.add_parser("status", help="show index statistics")
+    _add_global_options(status)
     status.set_defaults(handler=cmd_status)
 
     clear = sub.add_parser("clear", help="delete the index")
+    _add_global_options(clear)
     clear.set_defaults(handler=cmd_clear)
 
     providers = sub.add_parser("providers", help="list embedding providers")
+    _add_global_options(providers)
     providers.set_defaults(handler=cmd_providers)
 
     doctor = sub.add_parser("doctor", help="check the setup and the index")
+    _add_global_options(doctor)
     doctor.set_defaults(handler=cmd_doctor)
 
     mcp = sub.add_parser("mcp", help="serve the index to agents over MCP (stdio)")
+    _add_global_options(mcp)
     mcp.set_defaults(handler=cmd_mcp)
     return parser
+
+
+def _add_global_options(sub: argparse.ArgumentParser) -> None:
+    """Accept the global flags after the subcommand too — `fyc index --provider hash` is
+    what everyone types. SUPPRESS matters: argparse copies a subparser's defaults over
+    the main namespace, so a plain default would erase the value given before the verb."""
+    sub.add_argument("-C", "--root", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
+    sub.add_argument(
+        "--provider", choices=sorted(PROVIDERS), default=argparse.SUPPRESS, help=argparse.SUPPRESS
+    )
+    sub.add_argument("--model", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
 
 
 def _add_result_options(sub: argparse.ArgumentParser) -> None:
@@ -428,7 +448,7 @@ def _embedder(cfg, provider: str | None = None, model: str | None = None):
             model if model is not None else cfg.model,
             cfg.batch_size,
         )
-    except RuntimeError as exc:
+    except (RuntimeError, ValueError) as exc:  # a provider that cannot load the named model
         raise SystemExit(str(exc)) from exc
 
 
