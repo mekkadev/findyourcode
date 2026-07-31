@@ -200,3 +200,46 @@ def test_consecutive_windows_of_one_function_are_not_deduped(cfg):
 
     kept = _dedupe([first, second, duplicate], per_file=0)
     assert [h.row.id for h in kept] == [1, 2]
+
+
+def test_alpha_actually_moves_the_ranking():
+    """A blend that ignores alpha would otherwise ship unnoticed."""
+    from findyourcode.config import Config
+    from findyourcode.search import Hit, _score_blend
+    from findyourcode.store import Row
+
+    def pair():
+        row = Row(1, "a.py", "python", "function", "f", "", 1, 2, "x")
+        other = Row(2, "b.py", "python", "function", "g", "", 1, 2, "y")
+        return {
+            1: Hit(row=row, score=0.0, semantic=1.0, lexical=0.0),
+            2: Hit(row=other, score=0.0, semantic=0.0, lexical=1.0),
+        }
+
+    semantic_heavy = pair()
+    _score_blend(semantic_heavy, Config(alpha=0.9), lexical_used=True)
+    assert semantic_heavy[1].score > semantic_heavy[2].score
+
+    lexical_heavy = pair()
+    _score_blend(lexical_heavy, Config(alpha=0.1), lexical_used=True)
+    assert lexical_heavy[2].score > lexical_heavy[1].score
+
+
+def test_filters_hold_on_the_approximate_path(repo, monkeypatch):
+    """Small indexes take the exact path; force the ANN branch and re-check filters."""
+    import findyourcode.store as store_module
+
+    files = {f"py/mod_{i}.py": f"def handler_{i}(request):\n    return {i}\n" for i in range(30)}
+    files["rs/cache.rs"] = "fn handler_rust() -> u8 {\n    1\n}\n"
+    root = repo(files)
+    cfg = load_config(root, provider="hash")
+    embedder = get_embedder(cfg.provider)
+    store = Store(cfg.db_path)
+    build_index(cfg, embedder, store)
+
+    monkeypatch.setattr(store_module, "EXACT_SCAN_LIMIT", 0)
+    from findyourcode.store import Filters
+
+    hits = search(store, embedder, "handler", cfg, filters=Filters(langs=["rust"]))
+    assert all(h.row.lang == "rust" for h in hits)
+    store.close()
