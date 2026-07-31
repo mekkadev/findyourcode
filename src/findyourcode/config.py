@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import os
+import sys
 from dataclasses import dataclass, field, fields
 from pathlib import Path
 
-try:
+if sys.version_info >= (3, 11):
     import tomllib
-except ModuleNotFoundError:  # pragma: no cover - python 3.10
+else:  # pragma: no cover - python 3.10
     import tomli as tomllib
 
 CONFIG_FILENAME = ".findyourcode.toml"

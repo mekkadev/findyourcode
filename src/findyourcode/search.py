@@ -44,8 +44,13 @@ def search(
     dense: list[tuple[int, float]] = []
     sparse: list[tuple[int, float]] = []
     if mode in ("hybrid", "semantic"):
-        query_vector = embedder.embed_query(query)
-        dense = store.search_vector(query_vector, depth, filters)
+        vector = embedder.embed_query(query)
+        # A query the model reduces to nothing — punctuation, whitespace — has no
+        # direction to compare against. Asking anyway returns arbitrary neighbours
+        # under a brute-force scan and NULL distances under sqlite-vec.
+        if np.any(vector):
+            query_vector = vector
+            dense = store.search_vector(query_vector, depth, filters)
     if mode in ("hybrid", "lexical"):
         sparse = store.search_lexical(query, depth, filters)
 
@@ -89,7 +94,7 @@ def similar_to(
         return None, []
 
     vectors = store.vectors_for([anchor.id])
-    if anchor.id not in vectors:
+    if anchor.id not in vectors or not np.any(vectors[anchor.id]):
         return anchor, []
 
     depth = max(limit * cfg.oversample, 50)

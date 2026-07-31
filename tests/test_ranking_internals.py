@@ -84,7 +84,13 @@ def test_numpy_top_k_is_ordered_and_bounded(repo, monkeypatch):
     store.close()
 
 
-def test_a_query_with_no_words_returns_nothing_instead_of_crashing(repo):
+@pytest.mark.parametrize("vec_backend", [True, False])
+def test_a_query_with_no_words_returns_nothing_instead_of_crashing(repo, monkeypatch, vec_backend):
+    """Both backends: sqlite-vec answers NULL, a numpy scan answers every row with 0.0."""
+    import findyourcode.store as store_module
+
+    if not vec_backend:
+        monkeypatch.setattr(store_module, "_load_sqlite_vec", lambda db: False)
     root = repo({"a.py": "def alpha():\n    return 1\n"})
     cfg = load_config(root, provider="hash")
     embedder = get_embedder("hash")
