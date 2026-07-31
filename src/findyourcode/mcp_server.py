@@ -22,6 +22,11 @@ from .store import Filters, Store
 PROTOCOL_VERSION = "2025-06-18"
 SUPPORTED_PROTOCOLS = {"2024-11-05", "2025-03-26", "2025-06-18"}
 
+# An agent pays for every byte of a tool result, so a hit is trimmed to something
+# worth reading and the caller is told where to look for the rest.
+MAX_SNIPPET_LINES = 24
+MAX_SNIPPET_CHARS = 1400
+
 _FILTERS = {
     "lang": {"type": "array", "items": {"type": "string"}, "description": "restrict to languages"},
     "path": {
@@ -96,6 +101,8 @@ class Server:
         self.stdout = stdout
         self._store: Store | None = None
         self._embedder: Embedder | None = None
+        self._reranker = None
+        self._stamp = 0.0
         self.handlers: dict[str, Callable[[dict], Any]] = {
             "initialize": self._initialize,
             "ping": lambda params: {},
@@ -114,6 +121,16 @@ class Server:
                 message = json.loads(line)
             except json.JSONDecodeError:
                 self._send({"jsonrpc": "2.0", "id": None, "error": _error(-32700, "invalid json")})
+                continue
+            if not isinstance(message, dict):
+                # a batch (array) or a bare value: answerable, not fatal
+                self._send(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": None,
+                        "error": _error(-32600, "expected a single json-rpc object per line"),
+                    }
+                )
                 continue
             response = self._dispatch(message)
             if response is not None:
@@ -174,13 +191,17 @@ class Server:
             return _text(f"unknown tool '{name}'", is_error=True)
         try:
             return runner(arguments)
-        except SystemExit as exc:  # store guards raise these with a readable message
+        except (SystemExit, ValueError) as exc:  # guards and argument validation
             return _text(str(exc), is_error=True)
 
     def _search(self, arguments: dict) -> dict:
         query = (arguments.get("query") or "").strip()
         if not query:
             return _text("query is empty", is_error=True)
+
+        mode = arguments.get("mode") or "hybrid"
+        if mode not in ("hybrid", "semantic", "lexical"):
+            return _text(f"mode must be hybrid, semantic or lexical, not {mode!r}", is_error=True)
 
         store, embedder = self._open()
         hits = search(
@@ -190,7 +211,8 @@ class Server:
             self.cfg,
             limit=_limit(arguments),
             filters=_filters(arguments),
-            mode=arguments.get("mode") or "hybrid",
+            mode=mode,
+            reranker=self._rerank(),
         )
         if not hits:
             return _text(f"nothing in the index matches {query!r}")
@@ -236,7 +258,20 @@ class Server:
             lines.append("languages " + ", ".join(f"{lang} {n}" for lang, n in stats["langs"]))
         return _text("\n".join(lines), data=stats)
 
+    def _rerank(self):
+        """The cli honours cfg.rerank; an agent must get the same ranking a human gets."""
+        if self._reranker is None and self.cfg.rerank:
+            from .rerank import Reranker
+
+            self._reranker = Reranker(self.cfg.rerank)
+        return self._reranker
+
     def _open(self) -> tuple[Store, Embedder]:
+        stamp = self.cfg.db_path.stat().st_mtime if self.cfg.db_path.exists() else 0.0
+        if self._store is not None and stamp != self._stamp:
+            # the index was rebuilt while we were serving: rows we hold are gone
+            self.close()
+        self._stamp = stamp
         if self._store is None:
             if not self.cfg.db_path.exists():
                 raise SystemExit(f"no index at {self.cfg.root} — run `fyc index` there first")
@@ -259,7 +294,11 @@ def _filters(arguments: dict) -> Filters:
         value = arguments.get(key)
         if not value:
             return None
-        return [value] if isinstance(value, str) else list(value)
+        if isinstance(value, str):
+            return [value]
+        if isinstance(value, list) and all(isinstance(item, str) for item in value):
+            return list(value)
+        raise ValueError(f"{key} must be a string or a list of strings")
 
     return Filters(langs=listed("lang"), paths=listed("path"), kinds=listed("kind"))
 
@@ -276,10 +315,21 @@ def _render(hits) -> str:
     for hit in hits:
         row = hit.row
         label = " ".join(p for p in (row.kind, symbol_of(row)) if p)
-        blocks.append(
-            f"{row.rel}:{row.start_line}-{row.end_line}  {label}  [{hit.score:.3f}]\n{row.code}"
-        )
+        where = f"{row.rel}:{row.start_line}-{row.end_line}"
+        blocks.append(f"{where}  {label}  [{hit.score:.3f}]\n{_snippet(row)}")
     return "\n\n".join(blocks)
+
+
+def _snippet(row) -> str:
+    lines = row.code.split("\n")
+    shown = lines[:MAX_SNIPPET_LINES]
+    text = "\n".join(shown)[:MAX_SNIPPET_CHARS]
+    if len(shown) < len(lines) or len(text) < len("\n".join(shown)):
+        remaining = row.end_line - row.start_line + 1 - len(shown)
+        text += f"\n    ... read {row.rel} from line {row.start_line}"
+        if remaining > 0:
+            text += f" for {remaining} more lines"
+    return text
 
 
 def _as_dict(hit) -> dict:
@@ -294,7 +344,7 @@ def _row_dict(row) -> dict:
         "lang": row.lang,
         "kind": row.kind,
         "symbol": symbol_of(row),
-        "code": row.code,
+        "code": _snippet(row),
     }
 
 

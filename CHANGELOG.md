@@ -34,6 +34,17 @@ notable changes, newest first. semver.
 
 ### fixed
 
+- `fyc doctor` called an index fresh when a file had been edited: it compared the
+  set of paths and threw the hashes away. it also reported every check green on an
+  index whose vector backend no search could read.
+- the mcp server died on any json line that was not an object, returned whole
+  chunks twice — 19 kb for one search — served a stale handle after a reindex,
+  accepted an invalid `mode` without complaint, and ignored a configured reranker
+  that the cli would have honoured.
+- `fyc eval --sweep` returned before the `--min-mrr` gate could run, silently
+  disabling a ci threshold; its blend rows inherited `fusion` from config, so under
+  `fusion = "rrf"` all five measured rrf; and every report claimed recall@10 no
+  matter how small `--limit` was.
 - a query with no word characters (`()`, `...`, `&&`, or an empty argument)
   crashed with a traceback: a zero-length vector has no cosine, sqlite-vec
   returns null for it, and those rows sort first. they are dropped now.

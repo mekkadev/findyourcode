@@ -101,25 +101,29 @@ def evaluate(
     return report
 
 
-def render_report(report: Report, title: str = "") -> str:
+def levels(limit: int) -> list[int]:
+    """Only report a recall@k the run could actually have measured."""
+    ks = [k for k in (1, 3, 10) if k <= limit]
+    if limit not in ks:
+        ks.append(limit)
+    return ks
+
+
+def render_report(report: Report, title: str = "", limit: int = 10) -> str:
     lines = [title] if title else []
     for result in report.results:
         mark = f"#{result.rank}" if result.rank else "miss"
         lines.append(f"  {mark:>5}  {result.case.query[:56]:<56}  {result.top}")
-    lines.append(
-        f"  recall@1 {report.recall_at(1):.2f}  recall@3 {report.recall_at(3):.2f}  "
-        f"recall@10 {report.recall_at(10):.2f}  MRR {report.mrr():.3f}"
-        f"  ({len(report.results)} cases)"
-    )
+    scores = "  ".join(f"recall@{k} {report.recall_at(k):.2f}" for k in levels(limit))
+    lines.append(f"  {scores}  MRR {report.mrr():.3f}  ({len(report.results)} cases)")
     return "\n".join(lines)
 
 
-def render_sweep(rows: list[tuple[str, Report]]) -> str:
-    header = f"  {'setting':<16}{'recall@1':>10}{'recall@3':>10}{'recall@10':>11}{'MRR':>8}"
+def render_sweep(rows: list[tuple[str, Report]], limit: int = 10) -> str:
+    ks = levels(limit)
+    header = f"  {'setting':<16}" + "".join(f"{'recall@' + str(k):>11}" for k in ks) + f"{'MRR':>8}"
     lines = [header, "  " + "-" * (len(header) - 2)]
     for label, report in rows:
-        lines.append(
-            f"  {label:<16}{report.recall_at(1):>10.2f}{report.recall_at(3):>10.2f}"
-            f"{report.recall_at(10):>11.2f}{report.mrr():>8.3f}"
-        )
+        scores = "".join(f"{report.recall_at(k):>11.2f}" for k in ks)
+        lines.append(f"  {label:<16}{scores}{report.mrr():>8.3f}")
     return "\n".join(lines)

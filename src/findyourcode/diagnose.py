@@ -9,6 +9,7 @@ from dataclasses import dataclass
 
 from .config import Config
 from .embeddings import PROVIDERS
+from .indexer import _file_sha
 from .languages import get_parser
 from .store import Store
 from .walker import discover
@@ -112,6 +113,15 @@ def _providers() -> list[Check]:
     return checks
 
 
+def _readable(store: Store) -> Check:
+    """The vectors are only reachable through the backend that wrote them."""
+    try:
+        store.check_backend()
+    except SystemExit as exc:
+        return Check("vectors", False, str(exc).replace("\n", " "))
+    return Check("vectors", True, f"readable through {store.vector_backend}")
+
+
 def _index(cfg: Config) -> list[Check]:
     if not cfg.db_path.exists():
         return [Check("index", False, f"none at {cfg.root} — run `fyc index`")]
@@ -128,21 +138,28 @@ def _index(cfg: Config) -> list[Check]:
                 f"{stats['db_bytes'] / 1e6:.1f} mb, vectors via {stats['backend']}",
             ),
             Check("model", stats["signature"] != "-", stats["signature"]),
+            _readable(store),
         ]
     finally:
         store.close()
 
-    present = {source.rel for source in discover(cfg)}
-    added = len(present - set(known))
-    gone = len(set(known) - present)
-    fresh = added == 0 and gone == 0
+    present = {source.rel: source.path for source in discover(cfg)}
+    added = len(set(present) - set(known))
+    gone = len(set(known) - set(present))
+    changed = sum(
+        1
+        for rel, path in present.items()
+        if rel in known and _file_sha(path) not in (None, known[rel])
+    )
+    fresh = added == 0 and gone == 0 and changed == 0
+    parts = [f"{added} new", f"{changed} edited", f"{gone} deleted"]
     checks.append(
         Check(
             "freshness",
             fresh,
             "index covers every file on disk"
             if fresh
-            else f"{added} new, {gone} deleted since the last index — run `fyc index`",
+            else ", ".join(parts) + " since the last index — run `fyc index`",
         )
     )
     return checks

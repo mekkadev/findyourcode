@@ -253,15 +253,29 @@ def cmd_eval(args) -> int:
     provider, model = _parse_signature(store.get_meta("signature"), cfg)
     embedder = _embedder(cfg, provider=provider, model=model)
 
+    if args.sweep and (args.min_mrr is not None or args.min_recall is not None):
+        print("--sweep compares settings; a threshold needs a single run", file=sys.stderr)
+        return 2
+
     if args.sweep:
         rows = []
         for alpha in (0.0, 0.25, 0.5, 0.75, 1.0):
             cfg.alpha = alpha
-            rows.append((f"blend a={alpha:g}", evaluate(store, embedder, cfg, cases, args.limit)))
+            rows.append(
+                (
+                    f"blend a={alpha:g}",
+                    evaluate(store, embedder, cfg, cases, args.limit, fusion="blend"),
+                )
+            )
         for mode in ("semantic", "lexical"):
-            rows.append((mode, evaluate(store, embedder, cfg, cases, args.limit, mode=mode)))
+            rows.append(
+                (
+                    mode,
+                    evaluate(store, embedder, cfg, cases, args.limit, mode=mode, fusion="blend"),
+                )
+            )
         rows.append(("rrf", evaluate(store, embedder, cfg, cases, args.limit, fusion="rrf")))
-        print(render_sweep(rows))
+        print(render_sweep(rows, args.limit))
         store.close()
         return 0
 
@@ -276,7 +290,7 @@ def cmd_eval(args) -> int:
         reranker=_reranker(args, cfg),
     )
     store.close()
-    print(render_report(report, f"{provider}:{model}"))
+    print(render_report(report, f"{provider}:{model}", args.limit))
 
     if args.min_mrr is not None and report.mrr() < args.min_mrr:
         print(f"MRR {report.mrr():.3f} is below the required {args.min_mrr}", file=sys.stderr)

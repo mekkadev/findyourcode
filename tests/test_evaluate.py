@@ -95,3 +95,53 @@ def test_eval_command(repo, tmp_path, capsys):
     capsys.readouterr()
     assert cli.main(["-C", str(root), "eval", str(miss), "--min-mrr", "0.5"]) == 1
     assert "below the required" in capsys.readouterr().err
+
+
+def test_report_only_claims_metrics_the_limit_supports():
+    from findyourcode.evaluate import levels, render_sweep
+
+    assert levels(10) == [1, 3, 10]
+    assert levels(3) == [1, 3]
+    assert levels(5) == [1, 3, 5]
+    assert levels(1) == [1]
+
+    report = Report(results=[CaseResult(Case("a", ["x"]), rank=1)])
+    narrow = render_report(report, limit=3)
+    assert "recall@3" in narrow and "recall@10" not in narrow
+    assert "recall@10" in render_report(report, limit=10)
+
+    sweep = render_sweep([("blend", report)], limit=3)
+    assert "recall@3" in sweep and "recall@10" not in sweep
+
+
+def test_sweep_refuses_to_pretend_a_threshold_applies(repo, tmp_path, capsys):
+    root = repo(FILES)
+    cases = tmp_path / "c.json"
+    cases.write_text(json.dumps([{"query": "verify", "expect": "auth/login.py"}]), encoding="utf-8")
+    cli.main(["-C", str(root), "--provider", "hash", "index", "-q"])
+    capsys.readouterr()
+
+    assert cli.main(["-C", str(root), "eval", str(cases), "--sweep", "--min-mrr", "0.9"]) == 2
+    assert "a threshold needs a single run" in capsys.readouterr().err
+
+
+def test_sweep_blend_rows_are_blend_even_under_an_rrf_config(repo, tmp_path, capsys, monkeypatch):
+    root = repo(FILES)
+    (root / ".findyourcode.toml").write_text('[findyourcode]\nfusion = "rrf"\n', encoding="utf-8")
+    cases = tmp_path / "c.json"
+    cases.write_text(json.dumps([{"query": "verify", "expect": "auth/login.py"}]), encoding="utf-8")
+    cli.main(["-C", str(root), "--provider", "hash", "index", "-q"])
+    capsys.readouterr()
+
+    seen = []
+    import findyourcode.cli as cli_module
+
+    real = cli_module.evaluate
+
+    def spy(*args, **kwargs):
+        seen.append(kwargs.get("fusion", ""))
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(cli_module, "evaluate", spy)
+    assert cli.main(["-C", str(root), "eval", str(cases), "--sweep"]) == 0
+    assert seen[:5] == ["blend"] * 5, seen

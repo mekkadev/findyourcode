@@ -153,3 +153,63 @@ def test_malformed_json_line(repo):
     Server(cfg, io.StringIO("not json\n\n"), stdout).serve()
     replies = [json.loads(line) for line in stdout.getvalue().splitlines()]
     assert replies[0]["error"]["code"] == -32700
+
+
+def test_a_non_object_message_does_not_kill_the_server(repo):
+    root = indexed(repo)
+    cfg = load_config(root, provider="hash")
+    stdout = io.StringIO()
+    stdin = io.StringIO('[]\n"bare"\n{"jsonrpc":"2.0","id":7,"method":"tools/list"}\n')
+    Server(cfg, stdin, stdout).serve()
+
+    replies = [json.loads(line) for line in stdout.getvalue().splitlines()]
+    assert [r.get("error", {}).get("code") for r in replies[:2]] == [-32600, -32600]
+    assert replies[2]["id"] == 7  # still serving after two bad frames
+
+
+def test_results_are_trimmed_for_an_agent(repo):
+    body = "\n".join(f"    step_{i} = {i}" for i in range(200))
+    root = repo({"long.py": f"def pipeline():\n{body}\n"})
+    cfg = load_config(root, provider="hash")
+    store = Store(cfg.db_path)
+    build_index(cfg, get_embedder(cfg.provider), store)
+    store.close()
+
+    reply = drive(root, call("search_code", query="pipeline step"))[0]["result"]
+    text = reply["content"][0]["text"]
+    blocks = text.split("\n\n")
+    assert blocks, text
+    for block in blocks:  # every hit is trimmed, however many come back
+        assert len(block.split("\n")) <= 27, block[:200]
+    assert "read long.py from line" in text
+    assert all(len(hit["code"]) < 2000 for hit in reply["structuredContent"]["results"])
+
+
+def test_a_rebuilt_index_is_picked_up(repo):
+    root = indexed(repo)
+    cfg = load_config(root, provider="hash")
+    server = Server(cfg, io.StringIO(), io.StringIO())
+
+    first = server._call_tool({"name": "index_status", "arguments": {}})
+    assert first["structuredContent"]["files"] == 2
+
+    (root / "third.py").write_text("def gamma():\n    return 3\n", encoding="utf-8")
+    store = Store(cfg.db_path)
+    build_index(cfg, get_embedder(cfg.provider), store)
+    store.close()
+
+    second = server._call_tool({"name": "index_status", "arguments": {}})
+    assert second["structuredContent"]["files"] == 3
+    server.close()
+
+
+def test_bad_arguments_are_reported(repo):
+    root = indexed(repo)
+    replies = drive(
+        root,
+        call("search_code", query="verify", mode="telepathy"),
+        call("search_code", query="verify", lang=[1, 2]),
+    )
+    assert all(r["result"]["isError"] for r in replies)
+    assert "mode must be" in replies[0]["result"]["content"][0]["text"]
+    assert "lang must be" in replies[1]["result"]["content"][0]["text"]
