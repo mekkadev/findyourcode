@@ -150,8 +150,8 @@ class _AstChunker:
         if inner.type in CONTAINER_NODES and body is not None:
             header_end = min(body.start_point[0], start + self.cfg.max_chunk_lines - 1)
             self._add(kind, name, parent, start, header_end, mark=range(start, header_end + 1))
-            self.containers.append((start, end, ".".join(trail + [name]) if name else parent))
-            self.walk(body, trail + [name] if name else trail)
+            self.containers.append((start, end, ".".join([*trail, name]) if name else parent))
+            self.walk(body, [*trail, name] if name else trail)
             return
 
         windows = []
@@ -175,7 +175,11 @@ class _AstChunker:
 
     def _unwrap(self, node):
         while node.type in _WRAPPERS:
-            nested = [c for c in node.named_children if is_definition(self.lang, c.type) and c.type != node.type]
+            nested = [
+                c
+                for c in node.named_children
+                if is_definition(self.lang, c.type) and c.type != node.type
+            ]
             if not nested:
                 return node
             node = nested[-1]
@@ -351,7 +355,9 @@ def _extract_doc(lines: list[str], start: int, end: int) -> str:
     doc: list[str] = []
     for line in lines[start : min(end, start + 24) + 1]:
         if _COMMENT_LINE.match(line):
-            doc.append(re.sub(r"^\s*(#+|//+|/\*+|\*+/?|--|;;|<!--)\s?", "", line).rstrip("*/ ").strip())
+            doc.append(
+                re.sub(r"^\s*(#+|//+|/\*+|\*+/?|--|;;|<!--)\s?", "", line).rstrip("*/ ").strip()
+            )
         elif doc and not line.strip():
             break
 

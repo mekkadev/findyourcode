@@ -9,14 +9,10 @@ from findyourcode.store import Store
 
 FILES = {
     "queue/ring.py": (
-        "class RingBuffer:\n"
-        "    def is_empty(self):\n"
-        "        return self.head == self.tail\n"
+        "class RingBuffer:\n    def is_empty(self):\n        return self.head == self.tail\n"
     ),
     "queue/deque.py": (
-        "class Deque:\n"
-        "    def is_empty(self):\n"
-        "        return len(self.items) == 0\n"
+        "class Deque:\n    def is_empty(self):\n        return len(self.items) == 0\n"
     ),
     "ui/paint.py": "def fill_rect(canvas, box, colour):\n    canvas.rect(box, colour)\n",
 }
@@ -92,8 +88,12 @@ def test_similar_cli(repo, capsys):
 
 
 def test_per_file_cap(repo):
-    body = "\n\n\n".join(f"def handler_{i}(request):\n    return process(request)" for i in range(8))
-    root = repo({"api/handlers.py": body + "\n", "api/other.py": "def process(request):\n    return 1\n"})
+    body = "\n\n\n".join(
+        f"def handler_{i}(request):\n    return process(request)" for i in range(8)
+    )
+    root = repo(
+        {"api/handlers.py": body + "\n", "api/other.py": "def process(request):\n    return 1\n"}
+    )
     cfg, store = _index(root)
 
     capped = search_hits(store, cfg, "request handler", per_file=2)

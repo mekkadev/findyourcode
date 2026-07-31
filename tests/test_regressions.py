@@ -77,7 +77,9 @@ def test_exclude_patterns_with_slashes(repo, cfg):
 
 
 def test_unreadable_file_loses_its_stale_chunks(repo):
-    root = repo({"gone.py": "def alpha():\n    return 1\n", "stays.py": "def beta():\n    return 2\n"})
+    root = repo(
+        {"gone.py": "def alpha():\n    return 1\n", "stays.py": "def beta():\n    return 2\n"}
+    )
     cfg = load_config(root, provider="hash")
     embedder = get_embedder(cfg.provider)
     store = Store(cfg.db_path)
@@ -242,4 +244,31 @@ def test_filters_hold_on_the_approximate_path(repo, monkeypatch):
 
     hits = search(store, embedder, "handler", cfg, filters=Filters(langs=["rust"]))
     assert all(h.row.lang == "rust" for h in hits)
+    store.close()
+
+
+def test_a_file_the_parser_chokes_on_is_reported_and_not_left_stale(repo, monkeypatch):
+    root = repo({"ok.py": "def alpha():\n    return 1\n", "bad.py": "def beta():\n    return 2\n"})
+    cfg = load_config(root, provider="hash")
+    embedder = get_embedder(cfg.provider)
+    store = Store(cfg.db_path)
+    build_index(cfg, embedder, store)
+    assert any(h.row.rel == "bad.py" for h in search(store, embedder, "beta", cfg))
+
+    import findyourcode.indexer as indexer
+
+    real = indexer.chunk_source
+
+    def explode(rel, lang, text, config):
+        if rel == "bad.py":
+            raise ValueError("grammar exploded")
+        return real(rel, lang, text, config)
+
+    monkeypatch.setattr(indexer, "chunk_source", explode)
+    (root / "bad.py").write_text("def beta():\n    return 22\n", encoding="utf-8")
+    stats = build_index(cfg, embedder, store)
+
+    assert any("bad.py" in message and "grammar exploded" in message for message in stats.errors)
+    assert not any(h.row.rel == "bad.py" for h in search(store, embedder, "beta", cfg))
+    assert any(h.row.rel == "ok.py" for h in search(store, embedder, "alpha", cfg))
     store.close()

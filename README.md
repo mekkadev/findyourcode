@@ -44,6 +44,7 @@ fyc find "why do payments retry"
 fyc find "rate limit" --lang python --path src/api
 fyc find "worker entrypoint" -f paths | fzf
 fyc similar src/auth/session.py:42 # where else does this pattern live
+fyc doctor                         # why is it behaving like that
 ```
 
 `fyc similar` answers a question `find` cannot, from vectors already in the index:
@@ -57,9 +58,28 @@ like py311/queue.py:97-109 method Queue.empty
  3. py311/sched.py:98-101          method scheduler.empty  [0.711]
 ```
 
-other commands: `status`, `clear`, `providers`, `eval`. flags worth knowing:
-`-n` results, `-L` snippet lines, `--kind function`, `--mode semantic|lexical`,
-`--explain`, `--json`.
+other commands: `status`, `clear`, `providers`, `eval`, `mcp`. flags worth
+knowing: `-n` results, `-L` snippet lines, `--kind function`,
+`--mode semantic|lexical`, `--explain`, `--json`.
+
+## agents
+
+`fyc mcp` serves the index over mcp on stdio, so an agent stops grepping and
+searches by meaning like you do. three tools: `search_code`, `find_similar`,
+`index_status`.
+
+```bash
+claude mcp add findyourcode -- fyc -C /path/to/repo mcp
+```
+
+or, for anything that reads a json config:
+
+```json
+{ "mcpServers": { "findyourcode": { "command": "fyc", "args": ["-C", "/path/to/repo", "mcp"] } } }
+```
+
+it is the same index the cli uses, so `fyc index` (or `--watch`) keeps the agent
+current too.
 
 ## how it works
 
@@ -184,13 +204,14 @@ cd examples/demo_repo && fyc index && fyc find "checking the password on sign in
 
 `walker` picks files, `chunker` cuts them, `enrich` writes what gets embedded,
 `store` is sqlite, `search` is the two retrievers and the blend, `evaluate` is
-recall and mrr, `cli` is the surface.
+recall and mrr, `diagnose` is `doctor`, `mcp_server` is the agent surface, `cli`
+is yours. see `contributing.md`.
 
 ## next
 
-- mcp server, so agents search the same index
 - cross-encoder rerank over the top of the blend
 - query expansion for one-word queries
+- publish to pypi
 
 ## stack
 

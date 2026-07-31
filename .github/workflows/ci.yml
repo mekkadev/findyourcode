@@ -5,12 +5,39 @@ on:
     branches: ["**"]
   pull_request:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  test:
+  lint:
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e ".[vec,dev]"
+      - run: ruff check .
+      - run: ruff format --check src/findyourcode tests
+      - run: mypy
+
+  test:
+    runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
-        python-version: ["3.10", "3.11", "3.12"]
+        os: [ubuntu-latest]
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
+        include:
+          - os: macos-latest
+            python-version: "3.12"
+          - os: windows-latest
+            python-version: "3.12"
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -18,12 +45,41 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
       - run: pip install -e ".[vec,dev]"
-      - run: pytest -q
-      - name: smoke test on the demo repo
+      - run: pytest --cov=findyourcode --cov-report=term-missing --cov-fail-under=80
+
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -e ".[vec,dev]"
+      - name: index and query the demo repo
+        working-directory: examples/demo_repo
         run: |
-          cd examples/demo_repo
           python -m findyourcode --provider hash index -q
           python -m findyourcode find "checking the password on sign in" -n 3
           python -m findyourcode similar api/session.py:16 -n 2 -f paths
           python -m findyourcode status
+          python -m findyourcode doctor || true
           python -m findyourcode eval ../eval_demo.json -n 10 --min-recall 0.2
+      - name: answer an mcp handshake
+        working-directory: examples/demo_repo
+        run: |
+          printf '%s\n' \
+            '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05"}}' \
+            '{"jsonrpc":"2.0","id":2,"method":"tools/list"}' \
+            | python -m findyourcode mcp | grep -q search_code
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install build twine
+      - run: python -m build
+      - run: twine check dist/*

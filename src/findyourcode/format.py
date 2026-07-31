@@ -18,14 +18,16 @@ _C = {
 
 
 def _colors(enabled: bool) -> dict:
-    return _C if enabled else {k: "" for k in _C}
+    return _C if enabled else dict.fromkeys(_C, "")
 
 
 def use_color(stream=sys.stdout) -> bool:
     return stream.isatty() and not os.environ.get("NO_COLOR")
 
 
-def render(hits: list[Hit], snippet_lines: int = 8, explain: bool = False, color: bool = True) -> str:
+def render(
+    hits: list[Hit], snippet_lines: int = 8, explain: bool = False, color: bool = True
+) -> str:
     c = _colors(color)
     if not hits:
         return "nothing found"

@@ -1,0 +1,44 @@
+name: bug report
+description: something fyc does that it should not
+labels: [bug]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: version
+      description: output of `fyc --version`
+      placeholder: findyourcode 0.2.0
+    validations:
+      required: true
+
+  - type: input
+    id: provider
+    attributes:
+      label: provider and model
+      description: the `model` line of `fyc status`, or the flags you passed
+      placeholder: local / sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2
+    validations:
+      required: true
+
+  - type: textarea
+    id: command
+    attributes:
+      label: command
+      description: the exact command, with its output if there was any
+      render: console
+    validations:
+      required: true
+
+  - type: textarea
+    id: happened
+    attributes:
+      label: what happened
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: what you expected
+    validations:
+      required: true

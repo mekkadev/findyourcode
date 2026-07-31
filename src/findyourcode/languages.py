@@ -160,7 +160,12 @@ _DEFINITIONS["swift"] = {
     "deinit_declaration",
     "subscript_declaration",
 }
-_DEFINITIONS["scala"] = {"function_definition", "class_definition", "object_definition", "trait_definition"}
+_DEFINITIONS["scala"] = {
+    "function_definition",
+    "class_definition",
+    "object_definition",
+    "trait_definition",
+}
 
 # Nodes we descend into when they are too big to keep as one chunk.
 CONTAINER_NODES = {
@@ -231,7 +236,7 @@ def get_parser(lang: str):
     try:
         from tree_sitter_language_pack import get_parser as _get
 
-        return _get(lang)  # type: ignore[arg-type]
+        return _get(lang)
     except Exception:
         return None
 

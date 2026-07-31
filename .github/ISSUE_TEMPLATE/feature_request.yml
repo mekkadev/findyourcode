@@ -1,0 +1,19 @@
+name: feature request
+description: something fyc should be able to do and cannot
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: what you were trying to do
+      description: the search or the workflow, not the feature you have in mind yet
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: what fyc should do instead
+      description: a command line, if it is a command
+    validations:
+      required: true

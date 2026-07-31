@@ -54,9 +54,7 @@ def search(
         return []
     rows = store.rows(list(ids))
 
-    hits: dict[int, Hit] = {
-        cid: Hit(row=rows[cid], score=0.0) for cid in ids if cid in rows
-    }
+    hits: dict[int, Hit] = {cid: Hit(row=rows[cid], score=0.0) for cid in ids if cid in rows}
     for rank, (cid, score) in enumerate(dense, 1):
         if cid in hits:
             hits[cid].semantic, hits[cid].semantic_rank = score, rank
@@ -123,7 +121,7 @@ def _score_blend(
         alpha = 1.0
     elif not semantic_used:
         alpha = 0.0
-    for hit, sem, lex in zip(hits.values(), semantics, lexicals):
+    for hit, sem, lex in zip(hits.values(), semantics, lexicals, strict=True):
         hit.score = alpha * sem + (1.0 - alpha) * lex
 
 

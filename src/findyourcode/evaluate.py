@@ -87,9 +87,7 @@ def evaluate(
             if any(marker in hit.row.rel for marker in case.expect):
                 rank = position
                 break
-        report.results.append(
-            CaseResult(case=case, rank=rank, top=hits[0].row.rel if hits else "")
-        )
+        report.results.append(CaseResult(case=case, rank=rank, top=hits[0].row.rel if hits else ""))
     return report
 
 

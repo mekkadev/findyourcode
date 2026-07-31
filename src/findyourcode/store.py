@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
@@ -66,13 +67,13 @@ class Filters:
     def sql(self, prefix: str = "") -> tuple[str, list]:
         clauses, params = [], []
         if self.langs:
-            clauses.append("%slang IN (%s)" % (prefix, ",".join("?" * len(self.langs))))
+            clauses.append(f"{prefix}lang IN ({','.join('?' * len(self.langs))})")
             params += [lang.lower() for lang in self.langs]
         if self.kinds:
-            clauses.append("%skind IN (%s)" % (prefix, ",".join("?" * len(self.kinds))))
+            clauses.append(f"{prefix}kind IN ({','.join('?' * len(self.kinds))})")
             params += [kind.lower() for kind in self.kinds]
         if self.paths:
-            clauses.append("(%s)" % " OR ".join([f"{prefix}rel LIKE ?"] * len(self.paths)))
+            clauses.append("(" + " OR ".join([f"{prefix}rel LIKE ?"] * len(self.paths)) + ")")
             params += [f"%{p}%" for p in self.paths]
         return (" AND ".join(clauses) if clauses else "1=1"), params
 
@@ -120,7 +121,7 @@ class Store:
         row = self.db.execute("SELECT value FROM meta WHERE key = ?", (key,)).fetchone()
         return row["value"] if row else None
 
-    def set_meta(self, key: str, value: str) -> None:
+    def set_meta(self, key: str, value: object) -> None:
         self.db.execute(
             "INSERT INTO meta(key, value) VALUES(?, ?) "
             "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
@@ -151,11 +152,13 @@ class Store:
                 )
             except sqlite3.OperationalError:
                 self.db.execute(
-                    f"CREATE VIRTUAL TABLE IF NOT EXISTS vec_chunks USING vec0(embedding float[{dim}])"
+                    "CREATE VIRTUAL TABLE IF NOT EXISTS vec_chunks "
+                    f"USING vec0(embedding float[{dim}])"
                 )
         else:
             self.db.execute(
-                "CREATE TABLE IF NOT EXISTS vectors (chunk_id INTEGER PRIMARY KEY, vec BLOB NOT NULL)"
+                "CREATE TABLE IF NOT EXISTS vectors "
+                "(chunk_id INTEGER PRIMARY KEY, vec BLOB NOT NULL)"
             )
         self.db.commit()
 
@@ -192,10 +195,10 @@ class Store:
             (rel, sha, mtime, size, lang, len(chunks)),
         )
         file_id = cur.lastrowid
-        for chunk, text, vector in zip(chunks, texts, vectors):
+        for chunk, text, vector in zip(chunks, texts, vectors, strict=True):
             cur = self.db.execute(
-                "INSERT INTO chunks(file_id, rel, lang, kind, symbol, parent, start_line, end_line, code, sha)"
-                " VALUES (?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO chunks(file_id, rel, lang, kind, symbol, parent,"
+                " start_line, end_line, code, sha) VALUES (?,?,?,?,?,?,?,?,?,?)",
                 (
                     file_id,
                     chunk.rel,
@@ -216,7 +219,9 @@ class Store:
                     "INSERT INTO vec_chunks(rowid, embedding) VALUES (?, ?)", (chunk_id, blob)
                 )
             else:
-                self.db.execute("INSERT INTO vectors(chunk_id, vec) VALUES (?, ?)", (chunk_id, blob))
+                self.db.execute(
+                    "INSERT INTO vectors(chunk_id, vec) VALUES (?, ?)", (chunk_id, blob)
+                )
             self.db.execute("INSERT INTO chunks_fts(rowid, text) VALUES (?, ?)", (chunk_id, text))
         self._matrix = None
 
@@ -228,11 +233,16 @@ class Store:
             batch = shas[i : i + 500]
             marks = ",".join("?" * len(batch))
             queries = [
-                (f"SELECT c.sha AS sha, v.{column} AS vec FROM chunks c "
-                 f"JOIN {table} v ON v.{'rowid' if self._vec_ok else 'chunk_id'} = c.id "
-                 f"WHERE c.sha IN ({marks})", list(batch)),
-                (f"SELECT sha, vec FROM emb_cache WHERE sig = ? AND sha IN ({marks})",
-                 [sig, *batch]),
+                (
+                    f"SELECT c.sha AS sha, v.{column} AS vec FROM chunks c "
+                    f"JOIN {table} v ON v.{'rowid' if self._vec_ok else 'chunk_id'} = c.id "
+                    f"WHERE c.sha IN ({marks})",
+                    list(batch),
+                ),
+                (
+                    f"SELECT sha, vec FROM emb_cache WHERE sig = ? AND sha IN ({marks})",
+                    [sig, *batch],
+                ),
             ]
             for sql, params in queries:
                 try:
@@ -240,21 +250,21 @@ class Store:
                 except sqlite3.OperationalError:
                     continue
                 for row in rows:
-                    found.setdefault(row["sha"], np.frombuffer(row["vec"], dtype=np.float32, count=dim))
+                    found.setdefault(
+                        row["sha"], np.frombuffer(row["vec"], dtype=np.float32, count=dim)
+                    )
         return found
 
     def archive_vectors(self, sig: str) -> None:
         """Keep the vectors of the current index reachable across a --reindex."""
         table, column = self._vector_table()
         key = "rowid" if self._vec_ok else "chunk_id"
-        try:
+        with contextlib.suppress(sqlite3.OperationalError):
             self.db.execute(
                 f"INSERT OR REPLACE INTO emb_cache(sig, sha, vec) "
                 f"SELECT ?, c.sha, v.{column} FROM chunks c JOIN {table} v ON v.{key} = c.id",
                 (sig,),
             )
-        except sqlite3.OperationalError:
-            pass
 
     def _vector_table(self) -> tuple[str, str]:
         return ("vec_chunks", "embedding") if self._vec_ok else ("vectors", "vec")
@@ -262,7 +272,10 @@ class Store:
     def cache_vectors(self, sig: str, shas: list[str], vectors: np.ndarray) -> None:
         self.db.executemany(
             "INSERT OR REPLACE INTO emb_cache(sig, sha, vec) VALUES (?,?,?)",
-            [(sig, sha, np.asarray(v, dtype=np.float32).tobytes()) for sha, v in zip(shas, vectors)],
+            [
+                (sig, sha, np.asarray(v, dtype=np.float32).tobytes())
+                for sha, v in zip(shas, vectors, strict=True)
+            ],
         )
 
     def prune_cache(self, keep: int = 200_000) -> None:
@@ -298,10 +311,8 @@ class Store:
         self.db.execute(f"DELETE FROM chunks_fts WHERE rowid IN ({marks})", ids)
         table = "vec_chunks" if self._vec_ok else "vectors"
         column = "rowid" if self._vec_ok else "chunk_id"
-        try:
+        with contextlib.suppress(sqlite3.OperationalError):
             self.db.execute(f"DELETE FROM {table} WHERE {column} IN ({marks})", ids)
-        except sqlite3.OperationalError:
-            pass
         self.db.execute(f"DELETE FROM chunks WHERE id IN ({marks})", ids)
 
     # ---- reading ------------------------------------------------------
@@ -311,7 +322,9 @@ class Store:
         stored = self.get_meta("backend")
         current = "vec0" if self._vec_ok else "numpy"
         if stored and stored != current:
-            missing = "sqlite-vec is not available" if stored == "vec0" else "sqlite-vec is now loaded"
+            missing = (
+                "sqlite-vec is not available" if stored == "vec0" else "sqlite-vec is now loaded"
+            )
             raise SystemExit(
                 f"index stores vectors as '{stored}' but {missing}.\n"
                 f"Install it (pip install sqlite-vec) or rebuild with `fyc index --reindex`."
@@ -336,7 +349,11 @@ class Store:
                 "WHERE embedding MATCH ? AND k = ? ORDER BY distance",
                 (blob, fetch),
             ).fetchall()
-            hits = [(r["id"], 1.0 - float(r["distance"])) for r in rows]
+            # A zero-length vector has no cosine: sqlite-vec returns NULL, and those rows
+            # sort first. Drop them rather than scoring them ahead of real matches.
+            hits = [
+                (r["id"], 1.0 - float(r["distance"])) for r in rows if r["distance"] is not None
+            ]
             if allowed is not None:
                 hits = [h for h in hits if h[0] in allowed]
             return hits[:k]
@@ -362,7 +379,7 @@ class Store:
                 continue
             keys = list(found)
             matrix = np.vstack([found[cid] for cid in keys])
-            scored.extend(zip(keys, (matrix @ vector).tolist()))
+            scored.extend(zip(keys, (matrix @ vector).tolist(), strict=True))
         scored.sort(key=lambda pair: -pair[1])
         return scored[:k]
 
@@ -465,8 +482,15 @@ class Store:
 
 def _to_row(r: sqlite3.Row) -> Row:
     return Row(
-        r["id"], r["rel"], r["lang"], r["kind"], r["symbol"], r["parent"],
-        r["start_line"], r["end_line"], r["code"],
+        r["id"],
+        r["rel"],
+        r["lang"],
+        r["kind"],
+        r["symbol"],
+        r["parent"],
+        r["start_line"],
+        r["end_line"],
+        r["code"],
     )
 
 
@@ -482,7 +506,7 @@ def _load_sqlite_vec(db: sqlite3.Connection) -> bool:
         return False
 
 
-_FTS_SAFE = str.maketrans({c: " " for c in '"*():^-+,.!?/\\[]{}<>=&|~%$#@'})
+_FTS_SAFE = str.maketrans(dict.fromkeys('"*():^-+,.!?/\\[]{}<>=&|~%$#@', " "))
 
 
 def _fts_query(query: str) -> str:

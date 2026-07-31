@@ -1,6 +1,7 @@
 import json
 
-from findyourcode import cli, store as store_module
+from findyourcode import cli
+from findyourcode import store as store_module
 from findyourcode.config import load_config
 from findyourcode.embeddings import get_embedder
 from findyourcode.indexer import build_index

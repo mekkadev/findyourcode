@@ -47,7 +47,7 @@ def test_index_and_find(repo):
 
 def test_incremental_reuses_and_updates(repo):
     root = repo(FILES)
-    cfg, embedder, store, first = index(root)
+    cfg, embedder, store, _first = index(root)
     store.close()
 
     _, _, store, second = index(root)
@@ -108,8 +108,13 @@ def test_reindex_after_switching_models(repo):
     assert stats.embedded == stats.chunks
     assert int(store.get_meta("dim")) == embedder.dim
 
-    stored = next(iter(store.vectors_for([r["id"] for r in store.db.execute(
-        "SELECT id FROM chunks LIMIT 1")]).values()))
+    stored = next(
+        iter(
+            store.vectors_for(
+                [r["id"] for r in store.db.execute("SELECT id FROM chunks LIMIT 1")]
+            ).values()
+        )
+    )
     assert stored.shape == (embedder.dim,)
     assert search(store, embedder, "login password", cfg)[0].row.rel == "api/session.py"
     store.close()

@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import time
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from typing import Callable
 
 import numpy as np
 
@@ -178,7 +178,7 @@ def _flush(store: Store, embedder: Embedder, buffer: list[_Unit], stats: IndexSt
 
     wanted: dict[str, str] = {}
     for unit in buffer:
-        for chunk, text in zip(unit.chunks, unit.texts):
+        for chunk, text in zip(unit.chunks, unit.texts, strict=True):
             wanted.setdefault(chunk.sha, text)
 
     sig = embedder.signature
@@ -201,7 +201,7 @@ def _flush(store: Store, embedder: Embedder, buffer: list[_Unit], stats: IndexSt
             unit.source.size,
             unit.source.lang,
             unit.chunks,
-            [lexical_text(chunk, text) for chunk, text in zip(unit.chunks, unit.texts)],
+            [lexical_text(c, t) for c, t in zip(unit.chunks, unit.texts, strict=True)],
             matrix,
         )
         stats.indexed += 1

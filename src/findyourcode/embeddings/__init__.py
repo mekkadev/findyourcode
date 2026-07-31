@@ -3,10 +3,26 @@ from __future__ import annotations
 from .base import Embedder, normalize
 
 PROVIDERS = {
-    "local": ("findyourcode.embeddings.local", "LocalEmbedder", "offline ONNX model (multilingual, default)"),
-    "voyage": ("findyourcode.embeddings.remote", "VoyageEmbedder", "Voyage AI API, code-tuned (VOYAGE_API_KEY)"),
-    "openai": ("findyourcode.embeddings.remote", "OpenAIEmbedder", "OpenAI-compatible API (OPENAI_API_KEY)"),
-    "hash": ("findyourcode.embeddings.hashing", "HashEmbedder", "deterministic lexical fallback, no deps"),
+    "local": (
+        "findyourcode.embeddings.local",
+        "LocalEmbedder",
+        "offline ONNX model (multilingual, default)",
+    ),
+    "voyage": (
+        "findyourcode.embeddings.remote",
+        "VoyageEmbedder",
+        "Voyage AI API, code-tuned (VOYAGE_API_KEY)",
+    ),
+    "openai": (
+        "findyourcode.embeddings.remote",
+        "OpenAIEmbedder",
+        "OpenAI-compatible API (OPENAI_API_KEY)",
+    ),
+    "hash": (
+        "findyourcode.embeddings.hashing",
+        "HashEmbedder",
+        "deterministic lexical fallback, no deps",
+    ),
 }
 
 
@@ -18,4 +34,4 @@ def get_embedder(provider: str, model: str = "", batch_size: int = 64) -> Embedd
     return getattr(module, class_name)(model=model, batch_size=batch_size)
 
 
-__all__ = ["Embedder", "PROVIDERS", "get_embedder", "normalize"]
+__all__ = ["PROVIDERS", "Embedder", "get_embedder", "normalize"]

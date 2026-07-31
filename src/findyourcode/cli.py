@@ -1,8 +1,9 @@
-"""Command line interface: fyc index / find / similar / eval / status / clear / providers."""
+"""Command line interface: index, find, similar, eval, status, clear, providers, mcp."""
 
 from __future__ import annotations
 
 import argparse
+import contextlib
 import os
 import shutil
 import sys
@@ -35,10 +36,8 @@ def main(argv: list[str] | None = None) -> int:
         return args.handler(args)
     except BrokenPipeError:
         # `| head` closed the pipe; keep the interpreter from complaining on exit.
-        try:
+        with contextlib.suppress(OSError, ValueError):
             os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
-        except (OSError, ValueError):
-            pass
         return 0
     except RuntimeError as exc:  # provider and transport failures
         print(f"error: {exc}", file=sys.stderr)
@@ -80,7 +79,7 @@ def _build_parser() -> argparse.ArgumentParser:
     similar.set_defaults(handler=cmd_similar)
 
     ev = sub.add_parser("eval", help="measure ranking quality on a file of cases")
-    ev.add_argument("cases", help="JSON file: [{\"query\": \"...\", \"expect\": \"path/part\"}]")
+    ev.add_argument("cases", help='JSON file: [{"query": "...", "expect": "path/part"}]')
     ev.add_argument("-n", "--limit", type=int, default=10)
     ev.add_argument("--mode", choices=["hybrid", "semantic", "lexical"], default="hybrid")
     ev.add_argument("--fusion", choices=["blend", "rrf"], help="how the two rankings are merged")
@@ -98,6 +97,12 @@ def _build_parser() -> argparse.ArgumentParser:
 
     providers = sub.add_parser("providers", help="list embedding providers")
     providers.set_defaults(handler=cmd_providers)
+
+    doctor = sub.add_parser("doctor", help="check the setup and the index")
+    doctor.set_defaults(handler=cmd_doctor)
+
+    mcp = sub.add_parser("mcp", help="serve the index to agents over MCP (stdio)")
+    mcp.set_defaults(handler=cmd_mcp)
     return parser
 
 
@@ -115,9 +120,7 @@ def _add_result_options(sub: argparse.ArgumentParser) -> None:
         help="pretty (default), paths (path:line), files, or json",
     )
     sub.add_argument("--json", action="store_true", help="alias for --format json")
-    sub.add_argument(
-        "--per-file", type=int, help="max results from one file (0 = no limit)"
-    )
+    sub.add_argument("--per-file", type=int, help="max results from one file (0 = no limit)")
 
 
 def cmd_index(args) -> int:
@@ -243,14 +246,10 @@ def cmd_eval(args) -> int:
         rows = []
         for alpha in (0.0, 0.25, 0.5, 0.75, 1.0):
             cfg.alpha = alpha
-            rows.append(
-                (f"blend a={alpha:g}", evaluate(store, embedder, cfg, cases, args.limit))
-            )
+            rows.append((f"blend a={alpha:g}", evaluate(store, embedder, cfg, cases, args.limit)))
         for mode in ("semantic", "lexical"):
             rows.append((mode, evaluate(store, embedder, cfg, cases, args.limit, mode=mode)))
-        rows.append(
-            ("rrf", evaluate(store, embedder, cfg, cases, args.limit, fusion="rrf"))
-        )
+        rows.append(("rrf", evaluate(store, embedder, cfg, cases, args.limit, fusion="rrf")))
         print(render_sweep(rows))
         store.close()
         return 0
@@ -301,6 +300,20 @@ def cmd_clear(args) -> int:
     else:
         print("nothing to remove")
     return 0
+
+
+def cmd_doctor(args) -> int:
+    from .diagnose import render, run
+
+    checks = run(load_config(args.root))
+    print(render(checks))
+    return 0 if all(check.ok for check in checks) else 1
+
+
+def cmd_mcp(args) -> int:
+    from .mcp_server import serve
+
+    return serve(args.root)
 
 
 def cmd_providers(args) -> int:

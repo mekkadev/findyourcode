@@ -9,7 +9,7 @@ from pathlib import Path
 try:
     import tomllib
 except ModuleNotFoundError:  # pragma: no cover - python 3.10
-    import tomli as tomllib  # type: ignore[no-redef]
+    import tomli as tomllib
 
 CONFIG_FILENAME = ".findyourcode.toml"
 INDEX_DIRNAME = ".findyourcode"
