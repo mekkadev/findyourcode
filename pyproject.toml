@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "findyourcode"
+version = "0.1.0"
+description = "Semantic code search: find code by meaning, not by text"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = [
+    "numpy>=1.24",
+    "tree-sitter>=0.22",
+    "tree-sitter-language-pack>=0.4",
+]
+
+[project.optional-dependencies]
+local = ["fastembed>=0.4"]
+vec = ["sqlite-vec>=0.1.6"]
+dev = ["pytest>=8"]
+all = ["fastembed>=0.4", "sqlite-vec>=0.1.6", "pytest>=8"]
+
+[project.scripts]
+fyc = "findyourcode.cli:main"
+findyourcode = "findyourcode.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,0 +1,11 @@
+[findyourcode]
+provider = "local"
+exclude = [
+    "**/node_modules/**",
+    "**/.venv/**",
+    "**/__pycache__/**",
+    "**/dist/**",
+    "**/build/**",
+    "*.lock",
+    "*.min.js",
+]
