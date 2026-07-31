@@ -109,6 +109,8 @@ _DEFINITIONS: dict[str, set[str]] = {
         "method_declaration",
         "interface_declaration",
         "trait_declaration",
+        "namespace_definition",
+        "enum_declaration",
     },
     "c": {"function_definition", "struct_specifier", "enum_specifier", "type_definition"},
     "lua": {"function_declaration", "local_function", "function_definition"},
@@ -121,6 +123,9 @@ _DEFINITIONS["typescript"] = _DEFINITIONS["javascript"] | {
     "enum_declaration",
     "abstract_class_declaration",
     "module",
+    "ambient_declaration",
+    "function_signature",
+    "internal_module",
 }
 _DEFINITIONS["tsx"] = _DEFINITIONS["typescript"]
 _DEFINITIONS["cpp"] = _DEFINITIONS["c"] | {
@@ -139,17 +144,28 @@ _DEFINITIONS["csharp"] = {
     "property_declaration",
     "namespace_declaration",
 }
-_DEFINITIONS["kotlin"] = {"function_declaration", "class_declaration", "object_declaration"}
+_DEFINITIONS["kotlin"] = {
+    "function_declaration",
+    "class_declaration",
+    "object_declaration",
+    "companion_object",
+    "property_declaration",
+}
 _DEFINITIONS["swift"] = {
     "function_declaration",
     "class_declaration",
     "protocol_declaration",
     "property_declaration",
+    "init_declaration",
+    "deinit_declaration",
+    "subscript_declaration",
 }
 _DEFINITIONS["scala"] = {"function_definition", "class_definition", "object_definition", "trait_definition"}
 
 # Nodes we descend into when they are too big to keep as one chunk.
 CONTAINER_NODES = {
+    "companion_object",
+    "internal_module",
     "class_definition",
     "class_declaration",
     "abstract_class_declaration",

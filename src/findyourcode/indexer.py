@@ -31,6 +31,7 @@ class IndexStats:
     reused: int = 0
     elapsed: float = 0.0
     errors: list[str] = field(default_factory=list)
+    unreadable: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -102,6 +103,10 @@ def build_index(
                     say(_progress_line(stats, len(todo), started))
 
     _flush(store, embedder, buffer, stats)
+    if stats.unreadable:
+        # Readable when we hashed it, gone by the time we parsed it: drop the stale chunks.
+        store.remove_files(stats.unreadable)
+        stats.removed += len(stats.unreadable)
     store.prune_cache()
     store.set_meta("indexed_at", time.time())
     store.commit()
@@ -147,11 +152,13 @@ def _prepare(item: tuple[SourceFile, str], cfg: Config, stats: IndexStats) -> _U
     source, sha = item
     text = read_source(source.path)
     if text is None:
+        stats.unreadable.append(source.rel)
         return None
     try:
         chunks = chunk_source(source.rel, source.lang, text, cfg)
     except Exception as exc:  # a broken grammar must not kill the run
         stats.errors.append(f"{source.rel}: {exc}")
+        stats.unreadable.append(source.rel)
         return None
 
     kept, texts = [], []

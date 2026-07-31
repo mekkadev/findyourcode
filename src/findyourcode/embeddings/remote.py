@@ -25,7 +25,18 @@ class _HttpEmbedder(Embedder):
         self.api_key = os.environ.get(self.env_key, "")
         if not self.api_key:
             raise RuntimeError(f"provider '{self.name}' needs {self.env_key} in the environment")
-        self.dim = 0
+        self._dim = 0
+
+    @property
+    def dim(self) -> int:
+        """Only the endpoint knows the width; probe once so callers never see 0."""
+        if not self._dim:
+            self._request(["dimension probe"], True)
+        return self._dim
+
+    @dim.setter
+    def dim(self, value: int) -> None:
+        self._dim = value
 
     def _payload(self, texts: list[str], is_query: bool) -> dict:
         raise NotImplementedError
@@ -60,7 +71,7 @@ class _HttpEmbedder(Embedder):
 
     def embed_documents(self, texts: list[str]) -> np.ndarray:
         if not texts:
-            return np.zeros((0, self.dim or 1), dtype=np.float32)
+            return np.zeros((0, self._dim or 1), dtype=np.float32)
         out = [
             self._request(texts[i : i + self.batch_size], False)
             for i in range(0, len(texts), self.batch_size)

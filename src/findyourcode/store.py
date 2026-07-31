@@ -295,7 +295,19 @@ class Store:
 
     # ---- reading ------------------------------------------------------
 
+    def check_backend(self) -> None:
+        """An index built with sqlite-vec is unreadable without it, and vice versa."""
+        stored = self.get_meta("backend")
+        current = "vec0" if self._vec_ok else "numpy"
+        if stored and stored != current:
+            missing = "sqlite-vec is not available" if stored == "vec0" else "sqlite-vec is now loaded"
+            raise SystemExit(
+                f"index stores vectors as '{stored}' but {missing}.\n"
+                f"Install it (pip install sqlite-vec) or rebuild with `fyc index --reindex`."
+            )
+
     def search_vector(self, query: np.ndarray, k: int, filters: Filters) -> list[tuple[int, float]]:
+        self.check_backend()
         blob = np.asarray(query, dtype=np.float32).tobytes()
         allowed = self._allowed_ids(filters)
         if allowed is not None and not allowed:

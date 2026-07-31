@@ -17,7 +17,13 @@ from .languages import (
 _COMMENT_LINE = re.compile(r"^\s*(#|//|/\*|\*|--|;;|<!--)")
 _NOISE_LINE = re.compile(r"^[\s\}\)\]\;,`\"']*$")
 _DOCSTRING = re.compile(r'(?:[rubf]{0,2})("""|\'\'\')(.*?)\1', re.DOTALL | re.IGNORECASE)
-_WRAPPERS = {"decorated_definition", "export_statement", "expression_statement", "template_declaration"}
+_WRAPPERS = {
+    "decorated_definition",
+    "export_statement",
+    "expression_statement",
+    "template_declaration",
+    "ambient_declaration",
+}
 _DECL_TYPES = {
     "lexical_declaration",
     "variable_declaration",
@@ -33,6 +39,9 @@ _FIRST_DEFINITION = re.compile(
     re.MULTILINE,
 )
 _HEADING = re.compile(r"^#{1,6}\s+\S")
+_IMPORT_LINE = re.compile(
+    r"^\s*(import|from|using|require|include|#include|use|package\s+[\w.]+;|@import)\b"
+)
 
 _KIND_BY_TYPE = (
     ("method", "method"),
@@ -146,7 +155,8 @@ class _AstChunker:
             return
 
         windows = []
-        step = max(1, self.cfg.max_chunk_lines - self.cfg.overlap_lines)
+        overlap = min(self.cfg.overlap_lines, self.cfg.max_chunk_lines // 2)
+        step = max(1, self.cfg.max_chunk_lines - overlap)
         for wstart in range(start, end + 1, step):
             wend = min(wstart + self.cfg.max_chunk_lines - 1, end)
             windows.append((wstart, wend))
@@ -195,7 +205,12 @@ class _AstChunker:
                 continue
             body = self.lines[first : last + 1]
             meaningful = [ln for ln in body if ln.strip() and not _NOISE_LINE.match(ln)]
-            if len(meaningful) < self.cfg.min_chunk_lines:
+            if not meaningful:
+                continue
+            # A lone import or comment is noise; a lone `package m` is not.
+            if len(meaningful) < self.cfg.min_chunk_lines and all(
+                _COMMENT_LINE.match(ln) or _IMPORT_LINE.match(ln) for ln in meaningful
+            ):
                 continue
             self._add("block", "", self._container_at(first), first, last)
 
@@ -258,7 +273,7 @@ def _chunk_textual(rel: str, lang: str, lines: list[str], cfg: Config) -> list[C
         sections.append(("", 0, len(lines) - 1))
 
     chunks: list[Chunk] = []
-    step = max(1, cfg.max_chunk_lines - cfg.overlap_lines)
+    step = max(1, cfg.max_chunk_lines - min(cfg.overlap_lines, cfg.max_chunk_lines // 2))
     for title, start, end in sections:
         if end < start:
             continue

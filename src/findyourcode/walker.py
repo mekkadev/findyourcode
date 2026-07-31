@@ -24,7 +24,7 @@ class SourceFile:
 
 
 def discover(cfg: Config) -> list[SourceFile]:
-    paths = _git_files(cfg.root) or _walk(cfg.root)
+    paths = dict.fromkeys(_git_files(cfg.root) or _walk(cfg.root))
     include = [_compile(p) for p in cfg.include]
     exclude = [_compile(p) for p in cfg.exclude]
 
@@ -88,7 +88,13 @@ def _walk(root: Path) -> list[str]:
 
 @lru_cache(maxsize=512)
 def _compile(pattern: str) -> re.Pattern[str]:
-    anchored = "/" in pattern.strip("/")
+    pattern = pattern.strip()
+    rooted = pattern.startswith("/")
+    pattern = pattern.lstrip("/")
+    # gitignore semantics: `build/` matches that directory at any depth, `a/b` only where written.
+    anchored = rooted or "/" in pattern.rstrip("/")
+    if pattern.endswith("/"):
+        pattern += "**"
     body = _glob_to_regex(pattern)
     return re.compile(body if anchored else rf"(?:.*/)?{body}")
 
