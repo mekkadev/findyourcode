@@ -156,6 +156,13 @@ and the file summary, not the body. swap in `intfloat/multilingual-e5-large` or
 `voyage-code-3` and run the same eval on your own repo rather than trusting either
 number.
 
+don't take the table on faith — it is one command, and it works on your code too:
+
+```bash
+python scripts/benchmark.py                            # this python's stdlib
+python scripts/benchmark.py --corpus ~/work/monorepo --cases my_cases.json
+```
+
 ## models
 
 `local` runs offline through onnx and is the default. `voyage` (`voyage-code-3`,
