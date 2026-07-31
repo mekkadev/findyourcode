@@ -1,5 +1,8 @@
 import json
+import os
 import shutil
+
+import pytest
 
 from findyourcode import cli
 from findyourcode import store as store_module
@@ -79,21 +82,33 @@ def test_watch_loop_picks_up_changes_and_stops(repo, monkeypatch, capsys):
         if calls["n"] == 1:
             (root / "extra.py").write_text("def gamma():\n    return 3\n", encoding="utf-8")
             return
-        if calls["n"] == 2:
-            # someone removes the index while watch is running: the open handle would
-            # keep writing to a dead inode and report success forever
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(cli.time, "sleep", fake_sleep)
+    assert cli.main(["-C", str(root), "--provider", "hash", "index", "--watch"]) == 0
+
+    assert capsys.readouterr().out.count("indexed") >= 2
+    assert cli.main(["-C", str(root), "find", "gamma", "-f", "files"]) == 0
+    assert "extra.py" in capsys.readouterr().out
+
+
+@pytest.mark.skipif(os.name == "nt", reason="windows refuses to unlink an open database")
+def test_watch_recovers_when_the_index_is_deleted(repo, monkeypatch, capsys):
+    """On posix sqlite keeps writing to the unlinked inode and every pass looks fine."""
+    root = repo(FILES)
+    calls = {"n": 0}
+
+    def fake_sleep(_seconds):
+        calls["n"] += 1
+        if calls["n"] == 1:
             shutil.rmtree(root / ".findyourcode")
             return
         raise KeyboardInterrupt
 
     monkeypatch.setattr(cli.time, "sleep", fake_sleep)
     assert cli.main(["-C", str(root), "--provider", "hash", "index", "--watch"]) == 0
-
-    captured = capsys.readouterr()
-    assert captured.out.count("indexed") >= 2
-    assert "index disappeared" in captured.err
-    assert cli.main(["-C", str(root), "find", "gamma", "-f", "files"]) == 0
-    assert "extra.py" in capsys.readouterr().out
+    assert "index disappeared" in capsys.readouterr().err
+    assert (root / ".findyourcode" / "index.db").exists()
 
 
 def test_piping_into_head_does_not_traceback(repo, monkeypatch, capsys):
