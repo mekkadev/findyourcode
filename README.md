@@ -21,8 +21,8 @@ $ fyc find "reject a request without a valid ticket"
 ```
 
 `reject` appears nowhere in that repository, and the two answers are in different
-languages. grep cannot do this; an llm reading the whole repo can, but not in 300ms
-and not for free.
+languages. grep cannot do this. an llm reading the whole repository can, but not in
+40ms and not for free.
 
 ## install
 
@@ -70,18 +70,21 @@ without a grammar falls back to line windows, so no file drops out of the index.
 
 each chunk is rewritten before it is embedded. identifiers are split into words, so
 `checkUserCredentials` reads as `check user credentials`. the path, the enclosing
-class, the docstring and a one-line summary of the whole file go in front of the
-code, because most models only ever read the first 128–512 tokens:
+class, the docstring, and the file's own summary when it has one, all go in front
+of the code — most models only ever read the first 128–512 tokens:
 
 ```text
-python method CredentialChecker.check
+python class CredentialChecker
 about: Validates the login/password pair a client presents at sign-in.
-module: Session issuing and verification for the public API.
-names: credential checker check login password record users digest compare ticket
+names: credential checker validates login password pair client presents sign init
+       users secret bytes check record permission unknown digest hashlib pbkdf2 ...
 file: api/session.py (api session)
 code:
-    def check(self, login: str, password: str) -> str:
+class CredentialChecker:
+    ...
 ```
+
+that `names:` line is why a query never phrased like the code still lands on it.
 
 retrieval is two searches over one sqlite file — vectors through `sqlite-vec`, bm25
 through `fts5` — blended 0.75 to the vector side. that number was measured, not
@@ -98,7 +101,8 @@ cpython stdlib — 671 files, 15k chunks, one cpu, default model:
 ```
 first index      329s
 re-index         0.5s    nothing changed
-query            2-4s    1.5s of that is loading the model
+search           40ms    over 15k chunks
+cold start       2.6s    python starting and the model loading
 on disk          72mb
 ```
 
@@ -120,9 +124,11 @@ $ fyc eval examples/eval_stdlib.json --sweep
   rrf                   0.81      0.86       0.94   0.851
 ```
 
-36 queries against the whole stdlib, 26 by meaning and 10 by exact identifier. the
-hybrid beats either branch alone. on the meaning-only half semantic alone wins,
-which is exactly how a one-sided benchmark talks you into the wrong default.
+36 queries against the whole stdlib: 26 by meaning, 10 by exact identifier. split
+them and the reason for two retrievers shows. on the meaning half, semantic alone
+matches the blend — mrr 0.808 against 0.821. on the identifier half it collapses to
+recall@1 0.50 while the blend gets all ten. a benchmark of one shape only would
+have argued convincingly for deleting the branch that saves the other half.
 
 recall@1 is 0.83, so roughly one query in six puts the right file below the top. the
 ceiling is the default model's 128-token window — it reads the name, the docstring
