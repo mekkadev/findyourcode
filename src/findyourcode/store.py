@@ -223,9 +223,9 @@ class Store:
         ):
             if self._has_table(table) and self._columns(table) != columns:
                 self.db.execute(f"DROP TABLE {table}")
-        existed = self._has_table("refs")
+        complete = self._has_table("refs") and self._has_table("defs")
         self.db.executescript(_GRAPH_SCHEMA)
-        if not existed and self.db.execute("SELECT 1 FROM chunks LIMIT 1").fetchone():
+        if not complete and self.db.execute("SELECT 1 FROM chunks LIMIT 1").fetchone():
             self.set_meta("graph", "rebuild")
 
     def _columns(self, table: str) -> set[str]:
@@ -543,22 +543,24 @@ class Store:
         if not ids or not self._has_table("refs"):
             return []
         marks = ",".join("?" * len(ids))
-        names = [
-            r["name"]
-            for r in self.db.execute(f"SELECT name FROM defs WHERE chunk_id IN ({marks})", ids)
-        ]
-        if not names:
-            return []
-        # Drop the unresolvable names first. A seed that defines both `get` and something
-        # rare would otherwise spend the whole row budget on callers of `get` that are
-        # about to be thrown away, and the real caller would never be fetched at all.
-        definitions = self._definitions(set(names))
-        keep = sorted({name for name in names if name in definitions})
+        named = {
+            (r["name"], r["lang"])
+            for r in self.db.execute(
+                "SELECT d.name AS name, c.lang AS lang FROM defs d "
+                f"JOIN chunks c ON c.id = d.chunk_id WHERE d.chunk_id IN ({marks})",
+                ids,
+            )
+        }
+        # Resolve the names first. One that resolves nowhere — `get` — would otherwise
+        # spend the row budget on callers destined for the bin, and one that resolves
+        # everywhere would spend it on its own popularity. Both starve the rare name
+        # defined by the very same chunk, which is the one worth finding.
+        definitions = self._definitions(named)
+        keep = sorted({name for (name, lang) in named if (name, lang) in definitions})
         if not keep:
             return []
-        holes = ",".join("?" * len(keep))
         wanted = set(ids)
-        pairs = self._pairs(f"r.name IN ({holes})", [*keep, MAX_EDGES])
+        pairs = self._pairs_per_name(keep)
         return [edge for edge in self._resolve(pairs, definitions) if edge.dst in wanted]
 
     def _pairs(self, where: str, params: list) -> list[tuple]:
@@ -572,19 +574,26 @@ class Store:
             )
         ]
 
+    def _pairs_per_name(self, names: list[str]) -> list[tuple]:
+        """A budget per name rather than one shared pool: `append` has three thousand
+        callers and the name next to it has one, and it is the one we came for."""
+        share = max(MAX_EDGES // len(names), 50)
+        pairs: list[tuple] = []
+        for name in names:
+            pairs.extend(self._pairs("r.name = ?", [name, share]))
+        return pairs
+
     def _resolve(self, pairs: list[tuple], known: dict | None = None) -> list[Edge]:
         """One rule, used in both directions. `linecache.getline()` names the module it
         means, so a qualifier that matches a candidate's file or class settles it; failing
         that a definition in the caller's own file wins; failing that every remaining
         candidate is kept at weight 1/candidates. Only ever within one language — two
         languages sharing a method name is a coincidence, not a call."""
-        definitions = known or self._definitions({pair[3] for pair in pairs})
+        definitions = known or self._definitions({(pair[3], pair[2]) for pair in pairs})
         edges: list[Edge] = []
         for src, src_rel, src_lang, name, scope in pairs:
             candidates = [
-                found
-                for found in definitions.get(name, ())
-                if found[0] != src and found[2] == src_lang
+                found for found in definitions.get((name, src_lang), ()) if found[0] != src
             ]
             if not candidates:
                 continue
@@ -595,32 +604,46 @@ class Store:
             edges.extend(Edge(src, found[0], name, weight) for found in chosen)
         return edges
 
-    def _definitions(self, names: set[str]) -> dict[str, list[tuple[int, str, str, str]]]:
-        found: dict[str, list[tuple[int, str, str, str]]] = {}
-        listed = sorted(names)
+    def _definitions(self, wanted: set[tuple[str, str]]) -> dict[tuple[str, str], list[tuple]]:
+        """Candidate definitions per (name, language).
+
+        Counting per language matters: `handler` defined five times in python and five
+        times in javascript is two unambiguous-enough names, not one hopeless one, and
+        the cross-language halves were never going to be joined anyway."""
+        found: dict[tuple[str, str], list[tuple]] = {}
+        if not wanted:
+            return found
+        listed = sorted({name for name, _ in wanted})
+        langs = sorted({lang for _, lang in wanted})
+        lang_marks = ",".join("?" * len(langs))
         for start in range(0, len(listed), 400):
             batch = listed[start : start + 400]
             marks = ",".join("?" * len(batch))
-            keep = [
-                r["name"]
+            keep = {
+                (r["name"], r["lang"])
                 for r in self.db.execute(
-                    f"SELECT name, COUNT(*) n FROM defs WHERE name IN ({marks}) "
-                    "GROUP BY name HAVING n <= ?",
-                    [*batch, MAX_DEF_FANOUT],
+                    "SELECT d.name AS name, c.lang AS lang, COUNT(*) n FROM defs d "
+                    f"JOIN chunks c ON c.id = d.chunk_id WHERE d.name IN ({marks}) "
+                    f"AND c.lang IN ({lang_marks}) GROUP BY d.name, c.lang HAVING n <= ?",
+                    [*batch, *langs, MAX_DEF_FANOUT],
                 )
-            ]
+                if (r["name"], r["lang"]) in wanted
+            }
             if not keep:
                 continue
-            holes = ",".join("?" * len(keep))
+            names = sorted({name for name, _ in keep})
+            holes = ",".join("?" * len(names))
             for row in self.db.execute(
                 "SELECT d.name AS name, d.chunk_id AS id, c.rel AS rel, c.lang AS lang, "
                 f"c.parent AS parent FROM defs d JOIN chunks c ON c.id = d.chunk_id "
-                f"WHERE d.name IN ({holes})",
-                keep,
+                f"WHERE d.name IN ({holes}) AND c.lang IN ({lang_marks})",
+                [*names, *langs],
             ):
-                found.setdefault(row["name"], []).append(
-                    (row["id"], row["rel"], row["lang"], row["parent"] or "")
-                )
+                key = (row["name"], row["lang"])
+                if key in keep:
+                    found.setdefault(key, []).append(
+                        (row["id"], row["rel"], row["lang"], row["parent"] or "")
+                    )
         return found
 
     def restrict(self, ids: list[int], filters: Filters) -> set[int]:

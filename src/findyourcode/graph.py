@@ -50,7 +50,8 @@ _KEYWORDS = (
     "return yield await throw raise defer go func function def fn fun lambda "
     "print println printf sprintf format echo len sizeof typeof instanceof "
     "int str bool float double char byte long short void var let const new delete "
-    "require import include using assert panic recover super this self"
+    "require import include using assert panic recover super this self "
+    "defmodule defp defmacro defstruct defimpl defprotocol defdelegate"
 )
 _NOT_A_CALLEE = frozenset(_KEYWORDS.split(" "))
 
@@ -82,7 +83,10 @@ def definitions_from_tree(root, source: bytes, lang: str) -> list[tuple[int, str
     while stack and len(found) < MAX_NAMES_PER_FILE:
         node = stack.pop()
         stack.extend(node.named_children)
-        if not is_definition(lang, node.type):
+        # In elixir a definition *is* a call — `def deliver do`. A grammar that cannot
+        # tell the two apart would have every call site claim to define its callee, so
+        # such a language keeps only the definition its chunk is named after.
+        if _is_call(node.type) or not is_definition(lang, node.type):
             continue
         name = node_name(node, source)
         if name and _worth_an_edge(name):
@@ -165,9 +169,21 @@ def _callee_name(node, source: bytes) -> tuple[str | None, str]:
     if target is None:
         return None, ""
 
-    parts = _IDENT_TAIL.findall(_text(target, source))
-    scope = parts[-2] if len(parts) >= 2 else ""
+    scope = _qualifier(node, target, source)
     return _last_identifier(target, source), scope if _usable_scope(scope) else ""
+
+
+def _qualifier(node, target, source: bytes) -> str:
+    """What stood before the dot, read off the tree rather than off the text.
+
+    Java, ruby and php hang the receiver on the call node instead of folding it into
+    the callee, and reading the text of a callee is quadratic on `a().b().c()`."""
+    for field in ("object", "receiver"):
+        holder = node.child_by_field_name(field)
+        if holder is not None:
+            return _last_identifier(holder, source) or ""
+    children = target.named_children
+    return (_last_identifier(children[-2], source) or "") if len(children) >= 2 else ""
 
 
 def _usable_scope(scope: str) -> bool:

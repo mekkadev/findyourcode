@@ -103,7 +103,28 @@ def search(
     shortlist = _dedupe(ranked, cap)
     if reranker is not None:
         shortlist = reranker.rescore(query, shortlist[: max(cfg.rerank_depth, limit)])
+        shortlist = _keep_the_graph_below(shortlist, cfg)
     return shortlist[:limit]
+
+
+def reached_by_graph(hit: Hit) -> bool:
+    """True for a chunk no retriever returned — it is here because something calls it."""
+    return hit.graph is not None
+
+
+def _keep_the_graph_below(hits: list[Hit], cfg: Config) -> list[Hit]:
+    """A reranker rewrites every score from scratch, ceiling and all, so the promise
+    that structure never outranks a direct answer has to be made again afterwards."""
+    direct = [hit.score for hit in hits if not reached_by_graph(hit)]
+    if not direct:
+        return hits
+    ceiling = max(direct) * cfg.graph_ceiling
+    for hit in hits:
+        if reached_by_graph(hit):
+            hit.score = min(hit.score, ceiling)
+    # On a tie the direct answer goes first; a reranker that flattens everything to one
+    # score must not leave the page led by something no retriever returned.
+    return sorted(hits, key=lambda hit: (-hit.score, reached_by_graph(hit)))
 
 
 def similar_to(
@@ -144,24 +165,35 @@ def build_trace(
     """The call path through a result: who reaches it, and what it reaches in turn.
 
     Which callee to follow is decided by the query, not by the source order — the
-    branch that answers the question is the one worth printing."""
+    branch that answers the question is the one worth printing. Filters are not
+    applied: a call path that stopped at the edge of `--path` would not be a path."""
     root = TraceNode(row=row, relevance=1.0)
     visited = {row.id}
 
     up = _step(store, [row.id], "up", query_vector, cfg.trace_callers, visited)
-    down = _step(store, [row.id], "down", query_vector, cfg.trace_fanout, visited)
+    down = (
+        _step(store, [row.id], "down", query_vector, cfg.trace_fanout, visited)
+        if cfg.trace_depth > 0
+        else []
+    )
     for node in down:
-        node.children = _descend(store, node.row, cfg, query_vector, cfg.trace_depth - 1, visited)
+        node.children = _descend(
+            store, node.row, cfg, query_vector, cfg.trace_depth - 1, visited | {node.row.id}
+        )
     root.children = up + down
     return root
 
 
 def _descend(store, row: Row, cfg: Config, query_vector, depth: int, visited: set[int]):
+    """`visited` is the path to here, not everything seen anywhere: two branches of a
+    call tree may legitimately end at the same helper, and both should say so."""
     if depth <= 0:
         return []
-    nodes = _step(store, [row.id], "down", query_vector, cfg.trace_fanout, visited)
+    nodes = _step(store, [row.id], "down", query_vector, cfg.trace_fanout, set(visited))
     for node in nodes:
-        node.children = _descend(store, node.row, cfg, query_vector, depth - 1, visited)
+        node.children = _descend(
+            store, node.row, cfg, query_vector, depth - 1, visited | {node.row.id}
+        )
     return nodes
 
 
@@ -201,7 +233,10 @@ def _by_relevance(store: Store, ids: list[int], query_vector, edges) -> list[tup
     if query_vector is None:
         return sorted(((cid, edges[cid].weight) for cid in ids), key=lambda pair: -pair[1])
     vectors = store.vectors_for(ids)
-    scored = [(cid, float(np.dot(vectors[cid], query_vector))) for cid in ids if cid in vectors]
+    # No vector is a reason to rank a branch last, never a reason to drop it.
+    scored = [
+        (cid, float(np.dot(vectors[cid], query_vector)) if cid in vectors else -1.0) for cid in ids
+    ]
     return sorted(scored, key=lambda pair: -pair[1])
 
 
@@ -239,12 +274,19 @@ def _propagate(
             collect(edge.src, source, edge.weight, f"calls {edge.name}")
 
     candidates = {cid: value for cid, value in boosts.items() if cid not in hits}
-    fresh = sorted(candidates.items(), key=lambda pair: -pair[1][0])[: cfg.graph_limit]
-    if not fresh:
+    if not candidates:
         return set()
 
-    allowed = store.restrict(sorted(cid for cid, _ in fresh), filters)
-    rows = store.rows(sorted(allowed))
+    # Filter before taking the best few, not after: a page of `--lang python` should not
+    # lose its call-graph slots to five typescript neighbours that are then discarded.
+    allowed = store.restrict(sorted(candidates), filters)
+    fresh = sorted(
+        ((cid, value) for cid, value in candidates.items() if cid in allowed),
+        key=lambda pair: -pair[1][0],
+    )[: cfg.graph_limit]
+    if not fresh:
+        return set()
+    rows = store.rows(sorted(cid for cid, _ in fresh))
     for cid, (amount, label) in fresh:
         row = rows.get(cid)
         if row is None:

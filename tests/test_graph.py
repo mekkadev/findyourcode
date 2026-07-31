@@ -294,3 +294,175 @@ def test_a_common_name_does_not_crowd_out_the_real_callers(repo, monkeypatch):
     callers = {e.src for e in store.edges_to([_id(store, "svc/api.py")])}
     assert _id(store, "svc/boot.py") in callers
     store.close()
+
+
+def test_a_filter_does_not_cost_the_graph_its_slots(repo):
+    """The slots must go to neighbours that survive the filter, not be spent on six
+    that are about to be discarded — the excluded ones are listed first on purpose."""
+    body = "".join(f"    far{i}(x)\n" for i in range(6)) + "".join(
+        f"    near{i}(x)\n" for i in range(2)
+    )
+    files = {"hub.py": f'def dispatch(x):\n    """the login form entry point."""\n{body}'}
+    files.update({f"lib/near{i}.py": f"def near{i}(x):\n    return x\n" for i in range(2)})
+    files.update({f"other/far{i}.py": f"def far{i}(x):\n    return x\n" for i in range(6)})
+    cfg, embedder, store = _index(repo(files))
+
+    from findyourcode.store import Filters
+
+    hits = search(
+        store,
+        embedder,
+        "login form entry point",
+        cfg,
+        limit=20,
+        mode="lexical",
+        filters=Filters(paths=["hub.py", "lib/"]),
+    )
+    store.close()
+    assert {h.row.rel for h in hits if h.graph is not None} == {"lib/near0.py", "lib/near1.py"}
+
+
+def test_a_reranker_cannot_lift_a_graph_hit_to_the_top(repo):
+    class Inverter:
+        """The contract a reranker has: rewrite every score, ceiling included."""
+
+        def rescore(self, query, hits):
+            ordered = list(reversed(hits))
+            for i, hit in enumerate(ordered):
+                hit.score = 1.0 - 0.1 * i
+            return ordered
+
+    root = repo(FILES)
+    cfg, embedder, store = _index(root)
+    hits = search(store, embedder, QUERY, cfg, mode="lexical", reranker=Inverter())
+    store.close()
+
+    assert hits[0].row.rel == "web/routes.py"
+    assert all(h.score < hits[0].score for h in hits if h.graph is not None)
+
+
+def test_trace_depth_zero_means_no_hops(repo):
+    files = {f"step{i}.py": f"def step{i}(x):\n    return step{i + 1}(x)\n" for i in range(3)}
+    cfg, _embedder, store = _index(repo(files))
+    cfg.trace_depth, cfg.trace_callers = 0, 0
+    trace = build_trace(store, store.chunk_at("step0.py"), cfg)
+    store.close()
+
+    assert trace.children == []
+
+
+def test_two_branches_may_end_at_the_same_helper(repo):
+    files = {
+        "hub.py": "def dispatch(x):\n    alpha_one(x)\n    beta_two(x)\n",
+        "a.py": "def alpha_one(x):\n    return shared_helper(x)\n",
+        "b.py": "def beta_two(x):\n    return shared_helper(x)\n",
+        "h.py": "def shared_helper(x):\n    return x\n",
+    }
+    cfg, _embedder, store = _index(repo(files))
+    cfg.trace_callers = 0
+    trace = build_trace(store, store.chunk_at("hub.py"), cfg)
+    store.close()
+
+    reached = [child.children[0].row.rel for child in trace.children if child.children]
+    assert reached == ["h.py", "h.py"]
+
+
+def test_a_chunk_without_a_vector_still_shows_up_in_a_trace(repo):
+    root = repo(FILES)
+    cfg, embedder, store = _index(root)
+    signing = _id(store, "crypto/signing.py")
+    table = "vec_chunks" if store.vector_backend == "sqlite-vec" else "vectors"
+    column = "rowid" if store.vector_backend == "sqlite-vec" else "chunk_id"
+    store.db.execute(f"DELETE FROM {table} WHERE {column} = ?", (signing,))
+    store.commit()
+
+    cfg.trace_callers = 0
+    trace = build_trace(store, store.chunk_at("auth/session.py"), cfg, embedder.embed_query("sign"))
+    store.close()
+    assert [child.row.rel for child in trace.children] == ["crypto/signing.py"]
+
+
+def test_another_language_cannot_bury_a_name(repo):
+    """`handler` five times in python and five in javascript is two ordinary names,
+    not one hopeless one — the halves were never going to be joined anyway."""
+    files = {f"py{i}.py": "def handler(x):\n    return x\n" for i in range(5)}
+    files["caller.py"] = "def go(x):\n    return handler(x)\n"
+    files.update({f"js{i}.js": "function handler(x) {\n  return x;\n}\n" for i in range(5)})
+    _cfg, _embedder, store = _index(repo(files))
+
+    edges = store.edges_from([_id(store, "caller.py")])
+    assert len(edges) == 5
+    assert all(store.rows([e.dst])[e.dst].lang == "python" for e in edges)
+    store.close()
+
+
+def test_a_grammar_that_calls_its_definitions_still_records_the_calls(repo):
+    """In elixir `def deliver do` is a call node. Reading every call as a definition
+    left every module claiming to define what it merely called, and no refs at all."""
+    files = {
+        "lib/worker.ex": "defmodule Worker do\n  def run(x) do\n    deliver(x)\n  end\nend\n",
+    }
+    root = repo(files)
+    cfg = load_config(root, provider="hash")
+    embedder = get_embedder(cfg.provider)
+    store = Store(cfg.db_path)
+    build_index(cfg, embedder, store)
+
+    refs = {r["name"] for r in store.db.execute("SELECT name FROM refs")}
+    defs = {r["name"] for r in store.db.execute("SELECT name FROM defs")}
+    store.close()
+    assert "deliver" in refs
+    assert "deliver" not in defs
+
+
+def test_the_qualifier_survives_a_grammar_that_splits_the_receiver(repo):
+    """java, ruby and php hang the receiver on the call node, not on the callee."""
+    files = {
+        "Linecache.java": "class Linecache {\n  static String getline(String p) { return p; }\n}\n",
+        "Ftplib.java": "class Ftplib {\n  static String getline(String s) { return s; }\n}\n",
+        "Traceback.java": (
+            "class Traceback {\n  String frame(String p) { return Linecache.getline(p); }\n}\n"
+        ),
+    }
+    _cfg, _embedder, store = _index(repo(files))
+    edges = store.edges_from([_id(store, "Traceback.java")])
+
+    assert [(e.name, e.weight) for e in edges] == [("getline", 1.0)]
+    assert store.rows([edges[0].dst])[edges[0].dst].rel == "Linecache.java"
+    store.close()
+
+
+def test_a_dropped_defs_table_is_refilled_like_a_dropped_refs_table(repo):
+    root = repo(FILES)
+    cfg, embedder, store = _index(root)
+    store.db.executescript("DROP TABLE defs;")
+    store.commit()
+    store.close()
+
+    store = Store(cfg.db_path)
+    build_index(cfg, embedder, store)
+    assert store.edges_from([_id(store, "web/routes.py")])
+    store.close()
+
+
+def test_one_popular_name_does_not_spend_the_whole_row_budget(repo, monkeypatch):
+    from findyourcode import store as store_module
+
+    files = {
+        "hub.py": (
+            "class Hub:\n"
+            "    def append(self, x):\n"
+            "        return x\n"
+            "\n"
+            "    def zrare(self, x):\n"
+            "        return x\n"
+        )
+    }
+    files.update({f"crowd{i}.py": "def use(h, x):\n    return h.append(x)\n" for i in range(20)})
+    files["rare.py"] = "def only(h, x):\n    return h.zrare(x)\n"
+    _cfg, _embedder, store = _index(repo(files))
+
+    monkeypatch.setattr(store_module, "MAX_EDGES", 4)
+    callers = {e.src for e in store.edges_to([_id(store, "hub.py")])}
+    assert _id(store, "rare.py") in callers
+    store.close()

@@ -16,7 +16,7 @@ from typing import Any, TextIO
 from .config import Config, load_config
 from .embeddings import Embedder, get_embedder
 from .format import as_trace, symbol_of
-from .search import build_trace, search, similar_to
+from .search import build_trace, reached_by_graph, search, similar_to
 from .store import Filters, Store
 
 PROTOCOL_VERSION = "2025-06-18"
@@ -335,7 +335,7 @@ def _render(hits, traces: dict | None = None) -> str:
         label = " ".join(p for p in (row.kind, symbol_of(row)) if p)
         where = f"{row.rel}:{row.start_line}-{row.end_line}"
         head = f"{where}  {label}  [{hit.score:.3f}]"
-        if hit.via and hit.semantic_rank is None and hit.lexical_rank is None:
+        if reached_by_graph(hit):
             head += f"  (reached through the call graph — {hit.via})"
         node = (traces or {}).get(row.id)
         if node is not None:

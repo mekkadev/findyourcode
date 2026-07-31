@@ -6,7 +6,7 @@ import json
 import os
 import sys
 
-from .search import Hit, TraceNode
+from .search import Hit, TraceNode, reached_by_graph
 
 MAX_LINE_CHARS = 200
 _ARROWS = {"called by": "↑", "calls": "→"}
@@ -60,7 +60,7 @@ def render(
             if hit.graph is not None:
                 parts.append(f"graph +{hit.graph:.3f} ({hit.via})")
             out.append(f"    {c['meta']}{' | '.join(parts) or 'no sub-scores'}{c['reset']}")
-        elif hit.via and hit.semantic_rank is None and hit.lexical_rank is None:
+        elif reached_by_graph(hit):
             # nothing matched this text; say why it is on the page at all
             out.append(f"    {c['meta']}via the call graph — {hit.via}{c['reset']}")
 

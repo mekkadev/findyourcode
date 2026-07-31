@@ -27,6 +27,32 @@ notable changes, newest first. semver.
 
 ### fixed
 
+two adversarial review passes over the new code, each finding reproduced before
+it was believed:
+
+- the fanout cap counted definitions across all languages, so five javascript
+  `handler`s deleted the edges of five python ones — in exactly the mixed-language
+  repositories the graph is for.
+- elixir writes a definition as a call (`def deliver do`), so every call site
+  claimed to define its callee and the whole language ended up with no calls at
+  all. a grammar that cannot tell the two apart now keeps only what its chunk is
+  named after.
+- java, ruby and php hang the receiver on the call node rather than on the callee,
+  so `Linecache.getline(p)` lost its qualifier and resolved half to the wrong
+  file. reading the qualifier off the tree instead of off the text fixed that and
+  made a deeply chained expression linear rather than quadratic — 8000 chained
+  calls went from 2.9s to 0.11s.
+- a reranker rewrites every score from scratch, ceiling included, so it could put
+  a chunk no retriever returned at the top of the page.
+- `--path` cost the graph its slots: five neighbours were chosen and only then
+  filtered, leaving the eligible ones behind.
+- `trace_depth = 0` still expanded one hop; a shared `visited` set hid a helper
+  that two branches of a call tree both reach; a chunk whose vector was missing
+  was dropped from a trace instead of ranked last.
+- `edges_to` gave one popular name the whole row budget, starving the rare name
+  defined beside it. each name gets a share now.
+- a `defs` table dropped for the wrong shape was recreated empty and never
+  refilled, because only `refs` was checked.
 - a fresh index was 47% larger than its contents: `PRAGMA auto_vacuum` was issued
   after `journal_mode=WAL`, which silently discards it, so nothing was ever
   reclaimed. every vector was also copied into the archive table it was about to
