@@ -18,6 +18,16 @@ _COMMENT_LINE = re.compile(r"^\s*(#|//|/\*|\*|--|;;|<!--)")
 _NOISE_LINE = re.compile(r"^[\s\}\)\]\;,`\"']*$")
 _DOCSTRING = re.compile(r'(?:[rubf]{0,2})("""|\'\'\')(.*?)\1', re.DOTALL | re.IGNORECASE)
 _WRAPPERS = {"decorated_definition", "export_statement", "expression_statement", "template_declaration"}
+_DECL_TYPES = {
+    "lexical_declaration",
+    "variable_declaration",
+    "const_declaration",
+    "type_declaration",
+    "type_alias_declaration",
+    "property_declaration",
+    "field_declaration",
+}
+_CALLABLE_HINTS = ("function", "arrow", "lambda", "closure", "class", "struct", "interface")
 _HEADING = re.compile(r"^#{1,6}\s+\S")
 
 _KIND_BY_TYPE = (
@@ -72,6 +82,8 @@ def chunk_source(rel: str, lang: str, text: str, cfg: Config) -> list[Chunk]:
     builder = _AstChunker(rel, lang, lines, text.encode("utf-8"), cfg)
     builder.walk(tree.root_node, [])
     builder.collect_gaps()
+    if not builder.chunks and text.strip():
+        return _chunk_textual(rel, lang, lines, cfg)
     return sorted(builder.chunks, key=lambda c: (c.start_line, c.end_line))
 
 
@@ -89,7 +101,8 @@ class _AstChunker:
     def walk(self, node, trail: list[str]) -> None:
         for child in node.named_children:
             if is_definition(self.lang, child.type):
-                self.emit(child, trail)
+                if self._worth_own_chunk(child):
+                    self.emit(child, trail)
             elif child.type in ("expression_statement", "export_statement"):
                 for inner in child.named_children:
                     if is_definition(self.lang, inner.type):
@@ -120,14 +133,23 @@ class _AstChunker:
             self.walk(body, trail + [name] if name else trail)
             return
 
+        windows = []
         step = max(1, self.cfg.max_chunk_lines - self.cfg.overlap_lines)
-        windows = list(range(start, end + 1, step))
-        for i, wstart in enumerate(windows, 1):
+        for wstart in range(start, end + 1, step):
             wend = min(wstart + self.cfg.max_chunk_lines - 1, end)
-            label = f"{name} [{i}/{len(windows)}]" if name else f"[{i}/{len(windows)}]"
-            self._add(kind, label, parent, wstart, wend)
+            windows.append((wstart, wend))
             if wend >= end:
                 break
+        for i, (wstart, wend) in enumerate(windows, 1):
+            self._add(kind, f"{name} [{i}/{len(windows)}]".strip(), parent, wstart, wend)
+
+    def _worth_own_chunk(self, node) -> bool:
+        """A one-line `const` is noise on its own; it belongs to the surrounding block."""
+        if node.type not in _DECL_TYPES:
+            return True
+        if node.end_point[0] - node.start_point[0] >= self.cfg.min_chunk_lines:
+            return True
+        return _holds_callable(node)
 
     def _unwrap(self, node):
         while node.type in _WRAPPERS:
@@ -248,6 +270,15 @@ def _chunk_textual(rel: str, lang: str, lines: list[str], cfg: Config) -> list[C
             if wend >= end:
                 break
     return chunks
+
+
+def _holds_callable(node, depth: int = 3) -> bool:
+    for child in node.named_children:
+        if any(hint in child.type for hint in _CALLABLE_HINTS):
+            return True
+        if depth > 0 and _holds_callable(child, depth - 1):
+            return True
+    return False
 
 
 def _classify(node_type: str) -> str:
