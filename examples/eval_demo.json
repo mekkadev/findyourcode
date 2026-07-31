@@ -1,0 +1,14 @@
+[
+  { "query": "где происходит авторизация пользователя", "expect": "api/session.py" },
+  { "query": "проверка пароля при входе", "expect": "api/session.py" },
+  { "query": "выдача токена сессии", "expect": "api/session.py" },
+  { "query": "разграничение прав доступа по ролям", "expect": "web/middleware.ts" },
+  { "query": "middleware для проверки заголовка запроса", "expect": "web/middleware.ts" },
+  { "query": "как мы списываем деньги с карты", "expect": "billing/charge.go" },
+  { "query": "возврат средств покупателю", "expect": "billing/charge.go" },
+  { "query": "рисование графика на канвасе", "expect": "ui/chart.js" },
+  { "query": "форматирование подписей на оси", "expect": "ui/chart.js" },
+  { "query": "кэш с истечением по времени", "expect": "store/cache.rs" },
+  { "query": "where do we validate credentials", "expect": "api/session.py" },
+  { "query": "retry a failed payment capture", "expect": "billing/charge.go" }
+]

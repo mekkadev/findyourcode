@@ -1,14 +1,16 @@
-"""Command line interface: fyc index / find / similar / status / clear / providers."""
+"""Command line interface: fyc index / find / similar / eval / status / clear / providers."""
 
 from __future__ import annotations
 
 import argparse
 import shutil
 import sys
+from pathlib import Path
 
 from . import __version__
 from .config import load_config
 from .embeddings import PROVIDERS, get_embedder
+from .evaluate import evaluate, load_cases, render_report, render_sweep
 from .format import as_json, as_paths, render, symbol_of, use_color
 from .indexer import build_index
 from .search import search, similar_to
@@ -55,6 +57,15 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     _add_result_options(similar)
     similar.set_defaults(handler=cmd_similar)
+
+    ev = sub.add_parser("eval", help="measure ranking quality on a file of cases")
+    ev.add_argument("cases", help="JSON file: [{\"query\": \"...\", \"expect\": \"path/part\"}]")
+    ev.add_argument("-n", "--limit", type=int, default=10)
+    ev.add_argument("--mode", choices=["hybrid", "semantic", "lexical"], default="hybrid")
+    ev.add_argument("--fusion", choices=["blend", "rrf"], help="how the two rankings are merged")
+    ev.add_argument("--alpha", type=float, help="weight of the semantic branch (blend fusion)")
+    ev.add_argument("--sweep", action="store_true", help="compare several alpha values and modes")
+    ev.set_defaults(handler=cmd_eval)
 
     status = sub.add_parser("status", help="show index statistics")
     status.set_defaults(handler=cmd_status)
@@ -164,6 +175,41 @@ def cmd_similar(args) -> int:
         label = " ".join(p for p in (anchor.kind, symbol_of(anchor)) if p)
         print(f"like {anchor.rel}:{anchor.start_line}-{anchor.end_line} {label}\n", file=sys.stderr)
     return _emit(hits, args)
+
+
+def cmd_eval(args) -> int:
+    cfg = load_config(args.root, alpha=args.alpha)
+    if not cfg.db_path.exists():
+        print("no index here — run `fyc index` first", file=sys.stderr)
+        return 2
+
+    cases = load_cases(Path(args.cases))
+    store = Store(cfg.db_path)
+    provider, model = _parse_signature(store.get_meta("signature"), cfg)
+    embedder = _embedder(cfg, provider=provider, model=model)
+
+    if args.sweep:
+        rows = []
+        for alpha in (0.0, 0.25, 0.5, 0.75, 1.0):
+            cfg.alpha = alpha
+            rows.append(
+                (f"blend a={alpha:g}", evaluate(store, embedder, cfg, cases, args.limit))
+            )
+        for mode in ("semantic", "lexical"):
+            rows.append((mode, evaluate(store, embedder, cfg, cases, args.limit, mode=mode)))
+        rows.append(
+            ("rrf", evaluate(store, embedder, cfg, cases, args.limit, fusion="rrf"))
+        )
+        print(render_sweep(rows))
+        store.close()
+        return 0
+
+    report = evaluate(
+        store, embedder, cfg, cases, args.limit, mode=args.mode, fusion=args.fusion or ""
+    )
+    store.close()
+    print(render_report(report, f"{provider}:{model}"))
+    return 0 if not report.misses else 1
 
 
 def cmd_status(args) -> int:
