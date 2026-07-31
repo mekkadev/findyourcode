@@ -3,6 +3,7 @@ include .findyourcode.toml
 recursive-include tests *.py
 recursive-include examples *
 recursive-include scripts *.py
-recursive-include docs *.svg *.gif *.png
+recursive-include docs *.svg *.gif *.png *.md
 prune docs/*.cast
+prune examples/demo_repo/.findyourcode
 global-exclude __pycache__ *.py[cod] .findyourcode

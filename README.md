@@ -86,7 +86,7 @@ but that a strong result calls or that call it, join the page *below* the best
 direct answer and never above it. on ordinary queries that leaves the ranking
 untouched — mrr 0.850 with the graph and without it. on questions whose answer
 lives one call away, ten results find what text alone needs twelve to find.
-both claims are one command each, in [benchmarks](docs/BENCHMARKS.md).
+both claims are one command each, in [benchmarks](https://github.com/mekkadev/findyourcode/blob/main/docs/BENCHMARKS.md).
 
 ## agents
 
@@ -166,7 +166,7 @@ ask in russian and the same 26 questions still land on english code: recall@10
 0.81 against 0.88 for english, where bm25 alone gets 0.27.
 
 the settings that lost are printed next to the settings that won —
-[docs/BENCHMARKS.md](docs/BENCHMARKS.md) has the fusion sweep, the multi-hop set,
+[docs/BENCHMARKS.md](https://github.com/mekkadev/findyourcode/blob/main/docs/BENCHMARKS.md) has the fusion sweep, the multi-hop set,
 the multilingual control, and the cross-encoder rerank that was measured and
 rejected. don't take any of it on faith; it is one command on your own code:
 
