@@ -53,7 +53,9 @@ def build_index(
     stats = IndexStats()
 
     if reindex:
-        store.archive_vectors(embedder.signature)
+        # Archive under the signature the existing vectors were produced with, never the
+        # new one — otherwise a model switch relabels the old vector space as the new one.
+        store.archive_vectors(store.get_meta("signature") or embedder.signature)
         store.reset_vectors()
         store.commit()
 

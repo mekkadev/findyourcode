@@ -103,6 +103,14 @@ def test_reindex_after_switching_models(repo):
     stats = build_index(cfg, embedder, store, reindex=True)
     assert stats.indexed == 3
     assert store.get_meta("signature") == embedder.signature
+    # Vectors of the previous model must not be handed to the new one.
+    assert stats.reused == 0
+    assert stats.embedded == stats.chunks
+    assert int(store.get_meta("dim")) == embedder.dim
+
+    stored = next(iter(store.vectors_for([r["id"] for r in store.db.execute(
+        "SELECT id FROM chunks LIMIT 1")]).values()))
+    assert stored.shape == (embedder.dim,)
     assert search(store, embedder, "login password", cfg)[0].row.rel == "api/session.py"
     store.close()
 
