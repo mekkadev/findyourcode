@@ -26,4 +26,4 @@ jobs:
           python -m findyourcode find "password check" -n 3
           python -m findyourcode similar api/session.py:16 -n 2 -f paths
           python -m findyourcode status
-          python -m findyourcode eval ../eval_demo.json -n 10
+          python -m findyourcode eval ../eval_demo.json -n 10 --min-recall 0.2

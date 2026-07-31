@@ -323,6 +323,7 @@ $ fyc eval examples/eval_stdlib.json --sweep
 ```bash
 fyc eval my_cases.json              # свой набор кейсов
 fyc eval my_cases.json --sweep      # подобрать alpha под свой репозиторий
+fyc eval my_cases.json --min-mrr 0.6   # порог для CI: упасть, если качество просело
 ```
 
 ## Языки

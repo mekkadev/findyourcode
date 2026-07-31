@@ -78,6 +78,8 @@ def _build_parser() -> argparse.ArgumentParser:
     ev.add_argument("--fusion", choices=["blend", "rrf"], help="how the two rankings are merged")
     ev.add_argument("--alpha", type=float, help="weight of the semantic branch (blend fusion)")
     ev.add_argument("--sweep", action="store_true", help="compare several alpha values and modes")
+    ev.add_argument("--min-mrr", type=float, help="exit non-zero below this MRR (for CI)")
+    ev.add_argument("--min-recall", type=float, help="exit non-zero below this recall@1")
     ev.set_defaults(handler=cmd_eval)
 
     status = sub.add_parser("status", help="show index statistics")
@@ -250,7 +252,17 @@ def cmd_eval(args) -> int:
     )
     store.close()
     print(render_report(report, f"{provider}:{model}"))
-    return 0 if not report.misses else 1
+
+    if args.min_mrr is not None and report.mrr() < args.min_mrr:
+        print(f"MRR {report.mrr():.3f} is below the required {args.min_mrr}", file=sys.stderr)
+        return 1
+    if args.min_recall is not None and report.recall_at(1) < args.min_recall:
+        print(
+            f"recall@1 {report.recall_at(1):.2f} is below the required {args.min_recall}",
+            file=sys.stderr,
+        )
+        return 1
+    return 0
 
 
 def cmd_status(args) -> int:

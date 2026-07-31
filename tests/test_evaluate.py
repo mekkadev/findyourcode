@@ -87,3 +87,11 @@ def test_eval_command(repo, tmp_path, capsys):
 
     assert cli.main(["-C", str(root), "eval", str(cases), "--sweep"]) == 0
     assert "recall@1" in capsys.readouterr().out
+
+    # A miss alone is a measurement, not a failure — only a threshold fails the run.
+    miss = tmp_path / "miss.json"
+    miss.write_text(json.dumps([{"query": "nothing", "expect": "absent.py"}]), encoding="utf-8")
+    assert cli.main(["-C", str(root), "eval", str(miss)]) == 0
+    capsys.readouterr()
+    assert cli.main(["-C", str(root), "eval", str(miss), "--min-mrr", "0.5"]) == 1
+    assert "below the required" in capsys.readouterr().err
