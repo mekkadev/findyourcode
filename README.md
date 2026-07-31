@@ -178,7 +178,7 @@ unknown extensions still get indexed through the line-window fallback.
 ## development
 
 ```bash
-pytest                     # 66 tests, all on the hash provider, no network
+pytest                     # 67 tests, all on the hash provider, no network
 cd examples/demo_repo && fyc index && fyc find "checking the password on sign in"
 ```
 

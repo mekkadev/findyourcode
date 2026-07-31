@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import shutil
 import sys
 import time
@@ -32,6 +33,13 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     try:
         return args.handler(args)
+    except BrokenPipeError:
+        # `| head` closed the pipe; keep the interpreter from complaining on exit.
+        try:
+            os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+        except (OSError, ValueError):
+            pass
+        return 0
     except RuntimeError as exc:  # provider and transport failures
         print(f"error: {exc}", file=sys.stderr)
         return 3

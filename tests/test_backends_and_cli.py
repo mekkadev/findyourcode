@@ -86,3 +86,20 @@ def test_watch_loop_picks_up_changes_and_stops(repo, monkeypatch, capsys):
     assert output.count("indexed") >= 2
     assert cli.main(["-C", str(root), "find", "gamma", "-f", "files"]) == 0
     assert "extra.py" in capsys.readouterr().out
+
+
+def test_piping_into_head_does_not_traceback(repo, monkeypatch, capsys):
+    root = repo(FILES)
+    cli.main(["-C", str(root), "--provider", "hash", "index", "-q"])
+    capsys.readouterr()
+
+    real_print = __builtins__["print"] if isinstance(__builtins__, dict) else print
+
+    def closed_pipe(*args, **kwargs):
+        raise BrokenPipeError(32, "Broken pipe")
+
+    monkeypatch.setattr("builtins.print", closed_pipe)
+    try:
+        assert cli.main(["-C", str(root), "status"]) == 0
+    finally:
+        monkeypatch.setattr("builtins.print", real_print)
