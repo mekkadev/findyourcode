@@ -100,6 +100,11 @@ def cmd_find(args) -> int:
 
     store = Store(cfg.db_path)
     provider, model = _parse_signature(store.get_meta("signature"), cfg)
+    if (args.provider and args.provider != provider) or (args.model and args.model != model):
+        print(
+            f"note: querying with {provider}:{model} — the model the index was built with",
+            file=sys.stderr,
+        )
     embedder = _embedder(cfg, provider=provider, model=model)
 
     hits = search(
