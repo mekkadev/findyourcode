@@ -22,6 +22,7 @@ notable changes, newest first. semver.
   command, on this python's stdlib or on your own repository.
 - `scripts/record_demo.py`, which types the readme demo at human speed and runs
   it for real inside a pty — the gif is the tool's own output, not a mock-up.
+- an svg header and a social preview card under `docs/`.
 
 ### fixed
 

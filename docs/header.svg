@@ -2,7 +2,7 @@
      role="img" aria-label="findyourcode — search a codebase by what the code does, not the words in it">
   <title>findyourcode</title>
   <style>
-    .mono { font-family: ui-monospace, "SF Mono", "JetBrains Mono", "Fira Code", Menlo, Consolas, monospace; }
+    .mono { font-family: ui-monospace, "SF Mono", "JetBrains Mono", "Fira Code", Menlo, Consolas, "DejaVu Sans Mono", "Liberation Mono", monospace; }
     .name { font-size: 38px; font-weight: 600; letter-spacing: -1px; }
     .dim  { fill: #8b949e; }
     .lit  { fill: #3fb950; }

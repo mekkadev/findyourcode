@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 640" width="1280" height="640"
+     role="img" aria-label="findyourcode — search a codebase by what the code does, not the words in it">
+  <title>findyourcode</title>
+  <!-- social-preview.png is this file rasterised at 1280x640:
+       cairosvg, with the font stack collapsed to an installed monospace face. -->
+  <style>
+    .mono { font-family: ui-monospace, "SF Mono", "JetBrains Mono", "Fira Code", Menlo, Consolas, "DejaVu Sans Mono", "Liberation Mono", monospace; }
+    .name { font-size: 76px; font-weight: 600; letter-spacing: -2px; }
+    .tag  { font-size: 25px; fill: #8b949e; }
+    .code { font-size: 22px; }
+    .dim  { fill: #8b949e; }
+    .lit  { fill: #3fb950; }
+    .txt  { fill: #c9d1d9; }
+    .mut  { fill: #6e7681; }
+  </style>
+
+  <rect width="1280" height="640" fill="#0d1117" />
+  <rect x="0" y="0" width="1280" height="4" fill="#3fb950" fill-opacity="0.9" />
+
+  <text class="mono name" x="96" y="180">
+    <tspan class="dim">find</tspan><tspan class="lit">yourcode</tspan>
+  </text>
+  <text class="mono tag" x="100" y="228">search a codebase by what the code does, not the words in it</text>
+
+  <rect x="96" y="290" width="1088" height="228" rx="10" fill="#161b22" stroke="#30363d" stroke-width="1" />
+  <circle cx="126" cy="320" r="6" fill="#f85149" fill-opacity="0.75" />
+  <circle cx="148" cy="320" r="6" fill="#d29922" fill-opacity="0.75" />
+  <circle cx="170" cy="320" r="6" fill="#3fb950" fill-opacity="0.75" />
+
+  <text class="mono code" x="126" y="378">
+    <tspan class="lit">❯</tspan><tspan class="txt" dx="12">fyc find "reject a request without a valid ticket"</tspan>
+  </text>
+  <text class="mono code" x="126" y="424">
+    <tspan class="mut">1.</tspan><tspan class="txt" dx="12">web/middleware.ts:8-20</tspan><tspan class="mut" dx="18">function guard</tspan>
+  </text>
+  <text class="mono code" x="126" y="462">
+    <tspan class="mut">2.</tspan><tspan class="txt" dx="12">api/session.py:9-28</tspan><tspan class="mut" dx="18">class CredentialChecker</tspan>
+  </text>
+  <text class="mono code" x="126" y="500">
+    <tspan class="mut">neither file contains the word "reject"</tspan>
+  </text>
+
+  <text class="mono tag" x="96" y="588" font-size="21">tree-sitter chunks · vectors + bm25 in one sqlite file · offline · mcp</text>
+</svg>
