@@ -1,0 +1,8 @@
+include LICENSE README.md CHANGELOG.md CONTRIBUTING.md SECURITY.md
+include .findyourcode.toml
+recursive-include tests *.py
+recursive-include examples *
+recursive-include scripts *.py
+recursive-include docs *.svg *.gif *.png
+prune docs/*.cast
+global-exclude __pycache__ *.py[cod] .findyourcode

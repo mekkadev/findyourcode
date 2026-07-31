@@ -31,7 +31,7 @@ def run(cfg: Config) -> list[Check]:
         _vector_backend(),
         _fts5(),
         _grammars(),
-        _git(),
+        _git(cfg),
     ]
     checks.extend(_providers())
     checks.extend(_index(cfg))
@@ -79,15 +79,12 @@ def _grammars() -> Check:
     )
 
 
-def _git() -> Check:
-    found = shutil.which("git")
-    return Check(
-        "git",
-        True,
-        "found — file list comes from git ls-files, .gitignore honoured"
-        if found
-        else "not found — falling back to a directory walk",
-    )
+def _git(cfg: Config) -> Check:
+    if shutil.which("git") is None:
+        return Check("git", True, "not installed — falling back to a directory walk")
+    if not (cfg.root / ".git").exists():
+        return Check("git", True, f"{cfg.root} is not a git repository — walking the tree instead")
+    return Check("git", True, "file list comes from git ls-files, .gitignore honoured")
 
 
 def _providers() -> list[Check]:

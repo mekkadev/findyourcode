@@ -21,7 +21,7 @@ jobs:
       - run: pip install build twine
       - run: python -m build
       - run: twine check dist/*
-      - name: the tag must match the version in pyproject
+      - name: the tag must match the version in pyproject (which the package reads at runtime)
         run: |
           tag="${GITHUB_REF_NAME#v}"
           version=$(python -c "import tomllib,pathlib; print(tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']['version'])")

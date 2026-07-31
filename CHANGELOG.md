@@ -34,6 +34,15 @@ notable changes, newest first. semver.
 
 ### fixed
 
+- `fyc --version` reported 0.2.0 while the distribution was 0.3.0. the version is
+  read from the installed metadata now, so the two cannot drift again.
+- the sdist carried `tests/` without `conftest.py`, so the suite it shipped could
+  not run, and left out examples, scripts and docs entirely. a manifest fixes it,
+  and the suite was run from inside the built sdist to prove it.
+- readme images used repository-relative paths, which resolve on github and break
+  on pypi, where the readme is the landing page.
+- `fyc doctor` claimed .gitignore was honoured whenever git was installed, without
+  checking whether the root is a repository at all.
 - `fyc doctor` called an index fresh when a file had been edited: it compared the
   set of paths and threw the hashes away. it also reported every check green on an
   index whose vector backend no search could read.

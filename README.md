@@ -1,6 +1,6 @@
-<img src="docs/header.svg" alt="findyourcode — search a codebase by what the code does, not the words in it" width="640">
+<img src="https://raw.githubusercontent.com/mekkadev/findyourcode/main/docs/header.svg" alt="findyourcode — search a codebase by what the code does, not the words in it" width="640">
 
-<img src="docs/demo.gif" alt="fyc index, two searches by meaning, and fyc doctor, on a five-file repository" width="880">
+<img src="https://raw.githubusercontent.com/mekkadev/findyourcode/main/docs/demo.gif" alt="fyc index, two searches by meaning, and fyc doctor, on a five-file repository" width="880">
 
 the first query is `reject a request without a valid ticket`. `reject` appears
 nowhere in that repository, and the two answers it returns are in different
