@@ -115,10 +115,10 @@ class Store:
             (key, str(value)),
         )
 
-    def prepare(self, signature: str, dim: int) -> None:
+    def prepare(self, signature: str, dim: int, force: bool = False) -> None:
         """Bind the index to one embedding model; refuse to mix vector spaces."""
         current = self.get_meta("signature")
-        if current and current != signature:
+        if current and current != signature and not force:
             raise SystemExit(
                 f"index was built with '{current}', now using '{signature}'.\n"
                 f"Run `fyc index --reindex` to rebuild."
@@ -209,17 +209,43 @@ class Store:
         self._matrix = None
 
     def cached_vectors(self, sig: str, shas: list[str], dim: int) -> dict[str, np.ndarray]:
+        """Vectors already computed for this text: live index first, archive second."""
         found: dict[str, np.ndarray] = {}
+        table, column = self._vector_table()
         for i in range(0, len(shas), 500):
             batch = shas[i : i + 500]
-            rows = self.db.execute(
-                "SELECT sha, vec FROM emb_cache WHERE sig = ? AND sha IN (%s)"
-                % ",".join("?" * len(batch)),
-                [sig, *batch],
-            )
-            for row in rows:
-                found[row["sha"]] = np.frombuffer(row["vec"], dtype=np.float32, count=dim)
+            marks = ",".join("?" * len(batch))
+            queries = [
+                (f"SELECT c.sha AS sha, v.{column} AS vec FROM chunks c "
+                 f"JOIN {table} v ON v.{'rowid' if self._vec_ok else 'chunk_id'} = c.id "
+                 f"WHERE c.sha IN ({marks})", list(batch)),
+                (f"SELECT sha, vec FROM emb_cache WHERE sig = ? AND sha IN ({marks})",
+                 [sig, *batch]),
+            ]
+            for sql, params in queries:
+                try:
+                    rows = self.db.execute(sql, params).fetchall()
+                except sqlite3.OperationalError:
+                    continue
+                for row in rows:
+                    found.setdefault(row["sha"], np.frombuffer(row["vec"], dtype=np.float32, count=dim))
         return found
+
+    def archive_vectors(self, sig: str) -> None:
+        """Keep the vectors of the current index reachable across a --reindex."""
+        table, column = self._vector_table()
+        key = "rowid" if self._vec_ok else "chunk_id"
+        try:
+            self.db.execute(
+                f"INSERT OR REPLACE INTO emb_cache(sig, sha, vec) "
+                f"SELECT ?, c.sha, v.{column} FROM chunks c JOIN {table} v ON v.{key} = c.id",
+                (sig,),
+            )
+        except sqlite3.OperationalError:
+            pass
+
+    def _vector_table(self) -> tuple[str, str]:
+        return ("vec_chunks", "embedding") if self._vec_ok else ("vectors", "vec")
 
     def cache_vectors(self, sig: str, shas: list[str], vectors: np.ndarray) -> None:
         self.db.executemany(
@@ -227,8 +253,14 @@ class Store:
             [(sig, sha, np.asarray(v, dtype=np.float32).tobytes()) for sha, v in zip(shas, vectors)],
         )
 
-    def prune_cache(self) -> None:
-        self.db.execute("DELETE FROM emb_cache WHERE sha NOT IN (SELECT sha FROM chunks)")
+    def prune_cache(self, keep: int = 200_000) -> None:
+        """Live vectors are their own cache, so the archive only keeps what left the index."""
+        self.db.execute("DELETE FROM emb_cache WHERE sha IN (SELECT sha FROM chunks)")
+        self.db.execute(
+            "DELETE FROM emb_cache WHERE rowid NOT IN "
+            "(SELECT rowid FROM emb_cache ORDER BY rowid DESC LIMIT ?)",
+            (keep,),
+        )
 
     def reset_vectors(self) -> None:
         self.db.execute("DROP TABLE IF EXISTS vec_chunks")

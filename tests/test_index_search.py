@@ -74,6 +74,39 @@ def test_embedding_cache_is_reused_after_reindex(repo):
     store.close()
 
 
+def test_partial_edit_only_embeds_the_changed_chunk(repo):
+    source = (
+        "def alpha():\n    return 1\n\n\n"
+        "def beta():\n    return 2\n\n\n"
+        "def gamma():\n    return 3\n"
+    )
+    root = repo({"mod.py": source})
+    _, _, store, _ = index(root)
+    store.close()
+
+    (root / "mod.py").write_text(source.replace("return 2", "return 22"), encoding="utf-8")
+    _, _, store, second = index(root)
+    assert second.indexed == 1
+    assert second.embedded == 1
+    assert second.reused == 2
+    store.close()
+
+
+def test_reindex_after_switching_models(repo):
+    root = repo(FILES)
+    _, _, store, _ = index(root)
+    store.close()
+
+    cfg = load_config(root, provider="hash", model="hash-256")
+    embedder = get_embedder(cfg.provider, cfg.model, cfg.batch_size)
+    store = Store(cfg.db_path)
+    stats = build_index(cfg, embedder, store, reindex=True)
+    assert stats.indexed == 3
+    assert store.get_meta("signature") == embedder.signature
+    assert search(store, embedder, "login password", cfg)[0].row.rel == "api/session.py"
+    store.close()
+
+
 def test_filters(repo):
     root = repo(FILES)
     cfg, embedder, store, _ = index(root)

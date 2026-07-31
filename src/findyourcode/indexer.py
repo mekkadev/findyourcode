@@ -53,10 +53,11 @@ def build_index(
     stats = IndexStats()
 
     if reindex:
+        store.archive_vectors(embedder.signature)
         store.reset_vectors()
         store.commit()
 
-    store.prepare(embedder.signature, embedder.dim)
+    store.prepare(embedder.signature, embedder.dim, force=reindex)
 
     files = discover(cfg)
     stats.scanned = len(files)
