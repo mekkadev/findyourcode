@@ -95,6 +95,7 @@ class Store:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.db = sqlite3.connect(self.path)
         self.db.row_factory = sqlite3.Row
+        self.db.execute("PRAGMA auto_vacuum=INCREMENTAL")
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("PRAGMA synchronous=NORMAL")
         self.db.execute("PRAGMA foreign_keys=ON")
@@ -261,6 +262,8 @@ class Store:
             "(SELECT rowid FROM emb_cache ORDER BY rowid DESC LIMIT ?)",
             (keep,),
         )
+        self.db.commit()
+        self.db.execute("PRAGMA incremental_vacuum")
 
     def reset_vectors(self) -> None:
         self.db.execute("DROP TABLE IF EXISTS vec_chunks")
