@@ -18,6 +18,10 @@ notable changes, newest first. semver.
   handshake in the smoke job.
 - contributing, security, changelog, issue and pull request templates,
   dependabot.
+- `scripts/benchmark.py`, so the numbers in the readme can be checked in one
+  command, on this python's stdlib or on your own repository.
+- `scripts/record_demo.py`, which types the readme demo at human speed and runs
+  it for real inside a pty — the gif is the tool's own output, not a mock-up.
 
 ### fixed
 

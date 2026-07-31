@@ -1,28 +1,11 @@
-# findyourcode
+<img src="docs/header.svg" alt="findyourcode — search a codebase by what the code does, not the words in it" width="640">
 
-search a codebase by what the code does, not by the words it happens to contain.
+<img src="docs/demo.gif" alt="fyc index, two searches by meaning, and fyc doctor, on a five-file repository" width="880">
 
-```console
-$ fyc find "reject a request without a valid ticket"
-
- 1. web/middleware.ts:8-20  function guard  [1.000]
-     8 export async function guard(ctx: Context, next: () => Promise<void>) {
-     9   const header = ctx.headers["authorization"] ?? "";
-    10   const ticket = header.startsWith("Bearer ") ? header.slice(7) : "";
-    11   if (!ticket) {
-    ... 9 more lines
-
- 2. api/session.py:9-28  class CredentialChecker  [0.737]
-     9 class CredentialChecker:
-    10     """Validates the login/password pair a client presents at sign-in."""
-    11
-    12     def __init__(self, users, secret: bytes):
-    ... 16 more lines
-```
-
-`reject` appears nowhere in that repository, and the two answers are in different
-languages. grep cannot do this. an llm reading the whole repository can, but not in
-40ms and not for free.
+the first query is `reject a request without a valid ticket`. `reject` appears
+nowhere in that repository, and the two answers it returns are in different
+languages. grep cannot do this. an llm reading the whole repository can, but not
+in 40ms and not for free.
 
 ## install
 
@@ -208,6 +191,9 @@ unknown extensions still get indexed through the line-window fallback.
 pytest                     # 67 tests, all on the hash provider, no network
 cd examples/demo_repo && fyc index && fyc find "checking the password on sign in"
 ```
+
+`scripts/benchmark.py` reproduces the numbers above and `scripts/record_demo.py`
+re-records the gif at the top from live output.
 
 `walker` picks files, `chunker` cuts them, `enrich` writes what gets embedded,
 `store` is sqlite, `search` is the two retrievers and the blend, `evaluate` is

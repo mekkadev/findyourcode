@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 104" width="640" height="104"
+     role="img" aria-label="findyourcode — search a codebase by what the code does, not the words in it">
+  <title>findyourcode</title>
+  <style>
+    .mono { font-family: ui-monospace, "SF Mono", "JetBrains Mono", "Fira Code", Menlo, Consolas, monospace; }
+    .name { font-size: 38px; font-weight: 600; letter-spacing: -1px; }
+    .dim  { fill: #8b949e; }
+    .lit  { fill: #3fb950; }
+    .tag  { font-size: 13.5px; fill: #8b949e; letter-spacing: 0.2px; }
+    .rule { stroke: #8b949e; stroke-opacity: 0.28; stroke-width: 1; }
+  </style>
+
+  <!-- The caret is part of the text run, so it lands after the name whatever
+       monospace font the reader's browser resolves. -->
+  <text class="mono name" x="1" y="46">
+    <tspan class="dim">find</tspan><tspan class="lit">yourcode</tspan><tspan class="lit">▌<animate
+        attributeName="opacity" values="1;1;0;0;1" dur="1.15s" repeatCount="indefinite" /></tspan>
+  </text>
+
+  <line x1="1" y1="66" x2="639" y2="66" class="rule" />
+
+  <text class="mono tag" x="1" y="88">search a codebase by what the code does, not the words in it</text>
+</svg>
