@@ -55,6 +55,7 @@ class Config:
 
     workers: int = 8
     oversample: int = 8
+    per_file: int = 2
     fusion: str = "blend"
     alpha: float = 0.75
     rrf_k: int = 60

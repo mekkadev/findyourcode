@@ -34,6 +34,7 @@ def search(
     filters: Filters | None = None,
     mode: str = "hybrid",
     fusion: str = "",
+    per_file: int | None = None,
 ) -> list[Hit]:
     filters = filters or Filters()
     depth = max(limit * cfg.oversample, 50)
@@ -72,7 +73,8 @@ def search(
         _score_blend(hits, cfg, lexical_used=bool(sparse))
 
     ranked = sorted(hits.values(), key=lambda h: -h.score)
-    return _dedupe(ranked)[:limit]
+    cap = cfg.per_file if per_file is None else per_file
+    return _dedupe(ranked, cap)[:limit]
 
 
 def similar_to(
@@ -101,7 +103,7 @@ def similar_to(
         for rank, (cid, score) in enumerate(dense, 1)
         if cid in rows and cid != anchor.id and (same_file or rows[cid].rel != anchor.rel)
     ]
-    return anchor, _dedupe(hits)[:limit]
+    return anchor, _dedupe(hits, cfg.per_file)[:limit]
 
 
 def _fill_missing_semantics(store: Store, hits: dict[int, Hit], query_vector) -> None:
@@ -140,17 +142,17 @@ def _minmax(values: list[float | None]) -> list[float]:
     return [0.0 if v is None else (v - low) / span for v in values]
 
 
-def _dedupe(hits: list[Hit]) -> list[Hit]:
+def _dedupe(hits: list[Hit], per_file: int = 0) -> list[Hit]:
+    """Drop overlapping spans, and keep one file from swallowing the whole page."""
     kept: list[Hit] = []
     spans: dict[str, list[tuple[int, int]]] = {}
     for hit in hits:
         row = hit.row
-        overlaps = any(
-            row.start_line <= end and start <= row.end_line
-            for start, end in spans.get(row.rel, [])
-        )
-        if overlaps:
+        seen = spans.setdefault(row.rel, [])
+        if any(row.start_line <= end and start <= row.end_line for start, end in seen):
             continue
-        spans.setdefault(row.rel, []).append((row.start_line, row.end_line))
+        if per_file and len(seen) >= per_file:
+            continue
+        seen.append((row.start_line, row.end_line))
         kept.append(hit)
     return kept

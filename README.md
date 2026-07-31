@@ -220,6 +220,7 @@ fyc similar src/payments/refund.py:88 -n 5
 | `--mode` | `hybrid` (по умолчанию), `semantic`, `lexical` |
 | `--fusion` | `blend` или `rrf` |
 | `--explain` | ранги и скоры каждой ветки поиска |
+| `--per-file` | сколько чанков максимум из одного файла (по умолчанию 2, `0` — без лимита) |
 | `--same-file` | для `similar`: не выкидывать чанки из того же файла |
 
 </details>
@@ -262,6 +263,7 @@ max_chunk_lines = 110      # больше — крупнее чанки, мен�
 overlap_lines = 12
 alpha = 0.75               # вес семантики при слиянии
 oversample = 8             # во сколько раз глубже черпать кандидатов
+per_file = 2               # чтобы один файл не занял всю выдачу
 exclude = ["**/generated/**", "*.pb.go"]
 include = []               # если непусто — индексируется только это
 workers = 8
@@ -296,7 +298,7 @@ $ fyc eval examples/eval_stdlib.json --sweep
   blend a=0             0.61      0.69       0.83   0.673
   blend a=0.25          0.64      0.72       0.83   0.696
   blend a=0.5           0.67      0.75       0.83   0.711
-  blend a=0.75          0.69      0.75       0.86   0.738   ← дефолт
+  blend a=0.75          0.69      0.78       0.89   0.745   ← дефолт
   blend a=1             0.61      0.69       0.83   0.672
   semantic              0.61      0.69       0.83   0.672
   lexical               0.25      0.33       0.47   0.308
@@ -344,7 +346,7 @@ C#, C, C++, Lua, Bash, Elixir и остальные из `tree-sitter-language-p
 | `cli.py` / `format.py` | команды и вывод |
 
 ```bash
-pytest                    # 58 тестов, идут на провайдере hash — сеть не нужна
+pytest                    # 59 тестов, идут на провайдере hash — сеть не нужна
 cd examples/demo_repo && fyc index && fyc find "проверка пароля"
 ```
 

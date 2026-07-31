@@ -95,6 +95,9 @@ def _add_result_options(sub: argparse.ArgumentParser) -> None:
         help="pretty (default), paths (path:line), files, or json",
     )
     sub.add_argument("--json", action="store_true", help="alias for --format json")
+    sub.add_argument(
+        "--per-file", type=int, help="max results from one file (0 = no limit)"
+    )
 
 
 def cmd_index(args) -> int:
@@ -169,6 +172,7 @@ def cmd_find(args) -> int:
         filters=_filters(args),
         mode=args.mode,
         fusion=args.fusion or "",
+        per_file=args.per_file,
     )
     store.close()
     return _emit(hits, args, explain=args.explain)

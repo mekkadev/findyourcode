@@ -89,3 +89,22 @@ def test_similar_cli(repo, capsys):
     assert capsys.readouterr().out.strip().split("\n")[0] == "queue/deque.py"
 
     assert cli.main(["-C", str(root), "similar", "missing.py"]) == 2
+
+
+def test_per_file_cap(repo):
+    body = "\n\n\n".join(f"def handler_{i}(request):\n    return process(request)" for i in range(8))
+    root = repo({"api/handlers.py": body + "\n", "api/other.py": "def process(request):\n    return 1\n"})
+    cfg, store = _index(root)
+
+    capped = search_hits(store, cfg, "request handler", per_file=2)
+    assert sum(1 for h in capped if h.row.rel == "api/handlers.py") <= 2
+
+    uncapped = search_hits(store, cfg, "request handler", per_file=0)
+    assert sum(1 for h in uncapped if h.row.rel == "api/handlers.py") > 2
+    store.close()
+
+
+def search_hits(store, cfg, query, **kwargs):
+    from findyourcode.search import search
+
+    return search(store, get_embedder("hash"), query, cfg, limit=10, **kwargs)
