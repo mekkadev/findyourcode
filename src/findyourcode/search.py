@@ -35,6 +35,7 @@ def search(
     mode: str = "hybrid",
     fusion: str = "",
     per_file: int | None = None,
+    reranker=None,
 ) -> list[Hit]:
     filters = filters or Filters()
     depth = max(limit * cfg.oversample, 50)
@@ -77,7 +78,10 @@ def search(
 
     ranked = sorted(hits.values(), key=lambda h: -h.score)
     cap = cfg.per_file if per_file is None else per_file
-    return _dedupe(ranked, cap)[:limit]
+    shortlist = _dedupe(ranked, cap)
+    if reranker is not None:
+        shortlist = reranker.rescore(query, shortlist[: max(cfg.rerank_depth, limit)])
+    return shortlist[:limit]
 
 
 def similar_to(

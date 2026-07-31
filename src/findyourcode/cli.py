@@ -16,6 +16,7 @@ from .embeddings import PROVIDERS, get_embedder
 from .evaluate import evaluate, load_cases, render_report, render_sweep
 from .format import as_json, as_paths, render, symbol_of, use_color
 from .indexer import build_index
+from .rerank import DEFAULT_MODEL as RERANK_DEFAULT
 from .search import search, similar_to
 from .store import Filters, Store
 
@@ -68,6 +69,12 @@ def _build_parser() -> argparse.ArgumentParser:
     find.add_argument("--mode", choices=["hybrid", "semantic", "lexical"], default="hybrid")
     find.add_argument("--fusion", choices=["blend", "rrf"], help="how the two rankings are merged")
     find.add_argument("--explain", action="store_true", help="show per-retriever ranks")
+    find.add_argument(
+        "--rerank",
+        nargs="?",
+        const=RERANK_DEFAULT,
+        help="rescore the shortlist with a cross-encoder (optionally name the model)",
+    )
     find.set_defaults(handler=cmd_find)
 
     similar = sub.add_parser("similar", help="find code similar to a place in the codebase")
@@ -85,6 +92,9 @@ def _build_parser() -> argparse.ArgumentParser:
     ev.add_argument("--fusion", choices=["blend", "rrf"], help="how the two rankings are merged")
     ev.add_argument("--alpha", type=float, help="weight of the semantic branch (blend fusion)")
     ev.add_argument("--sweep", action="store_true", help="compare several alpha values and modes")
+    ev.add_argument(
+        "--rerank", nargs="?", const=RERANK_DEFAULT, help="rescore with a cross-encoder"
+    )
     ev.add_argument("--min-mrr", type=float, help="exit non-zero below this MRR (for CI)")
     ev.add_argument("--min-recall", type=float, help="exit non-zero below this recall@1")
     ev.set_defaults(handler=cmd_eval)
@@ -196,6 +206,7 @@ def cmd_find(args) -> int:
         mode=args.mode,
         fusion=args.fusion or "",
         per_file=args.per_file,
+        reranker=_reranker(args, cfg),
     )
     store.close()
     return _emit(hits, args, explain=args.explain)
@@ -255,7 +266,14 @@ def cmd_eval(args) -> int:
         return 0
 
     report = evaluate(
-        store, embedder, cfg, cases, args.limit, mode=args.mode, fusion=args.fusion or ""
+        store,
+        embedder,
+        cfg,
+        cases,
+        args.limit,
+        mode=args.mode,
+        fusion=args.fusion or "",
+        reranker=_reranker(args, cfg),
     )
     store.close()
     print(render_report(report, f"{provider}:{model}"))
@@ -342,6 +360,16 @@ def _reporter(quiet: bool):
             print(message, file=sys.stderr)
 
     return say
+
+
+def _reranker(args, cfg):
+    """--rerank names a model, or takes the configured one; absent means no second pass."""
+    model = getattr(args, "rerank", None) or cfg.rerank
+    if not model:
+        return None
+    from .rerank import Reranker
+
+    return Reranker(model)
 
 
 def _filters(args) -> Filters:

@@ -160,3 +160,47 @@ def test_index_paths_are_relative_to_the_root(tmp_path):
     cfg = load_config(tmp_path)
     assert cfg.index_dir == tmp_path / ".findyourcode"
     assert cfg.db_path == tmp_path / ".findyourcode" / "index.db"
+
+
+def test_reranker_reorders_the_shortlist_and_rescales(monkeypatch, repo):
+    """A cross-encoder sees query and chunk together; here a stub stands in for the model."""
+    import sys
+    import types
+
+    class FakeCrossEncoder:
+        def __init__(self, model):
+            self.model = model
+
+        def rerank(self, query, passages):
+            # last passage wins, so the reranker must be able to invert fusion's order
+            return [float(i) for i, _ in enumerate(passages)]
+
+    monkeypatch.setitem(
+        sys.modules,
+        "fastembed.rerank.cross_encoder",
+        types.SimpleNamespace(TextCrossEncoder=FakeCrossEncoder),
+    )
+    from findyourcode.rerank import Reranker
+
+    root = repo(
+        {
+            "a.py": "def alpha_handler(request):\n    return 1\n",
+            "b.py": "def beta_handler(request):\n    return 2\n",
+            "c.py": "def gamma_handler(request):\n    return 3\n",
+        }
+    )
+    cfg = load_config(root, provider="hash")
+    embedder = get_embedder("hash")
+    store = Store(cfg.db_path)
+    build_index(cfg, embedder, store)
+
+    plain = search(store, embedder, "handler request", cfg, limit=3)
+    reranked = search(store, embedder, "handler request", cfg, limit=3, reranker=Reranker("stub"))
+
+    assert [h.row.rel for h in reranked] == [h.row.rel for h in reversed(plain)]
+    assert reranked[0].score == pytest.approx(1.0)
+    assert reranked[-1].score == pytest.approx(0.0)
+
+    single = search(store, embedder, "handler request", cfg, limit=1, reranker=Reranker("stub"))
+    assert len(single) == 1  # nothing to reorder, and no crash
+    store.close()

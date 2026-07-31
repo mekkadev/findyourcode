@@ -47,9 +47,10 @@ knowing: `-n` results, `-L` snippet lines, `--kind function`,
 
 ## agents
 
-`fyc mcp` serves the index over mcp on stdio, so an agent stops grepping and
-searches by meaning like you do. three tools: `search_code`, `find_similar`,
-`index_status`.
+`fyc mcp` serves the index over mcp on stdio: `search_code`, `find_similar`,
+`index_status`. this is a retriever to put *next to* an agent's grep, not a
+replacement for it — claude code ships no index on purpose, and cursor's own
+numbers say grep and semantic together beat either alone.
 
 ```bash
 claude mcp add findyourcode -- fyc -C /path/to/repo mcp
@@ -133,6 +134,10 @@ matches the blend — mrr 0.808 against 0.821. on the identifier half it collaps
 recall@1 0.50 while the blend gets all ten. a benchmark of one shape only would
 have argued convincingly for deleting the branch that saves the other half.
 
+36 hand-written queries against one corpus is a smoke test with a method attached,
+not a benchmark — read it as evidence that the decisions were measured, not as a
+quality claim.
+
 recall@1 is 0.83, so roughly one query in six puts the right file below the top. the
 ceiling is the default model's 128-token window — it reads the name, the docstring
 and the file summary, not the body. swap in `intfloat/multilingual-e5-large` or
@@ -144,6 +149,30 @@ don't take the table on faith — it is one command, and it works on your code t
 ```bash
 python scripts/benchmark.py                            # this python's stdlib
 python scripts/benchmark.py --corpus ~/work/monorepo --cases my_cases.json
+```
+
+## rerank, measured and rejected
+
+a cross-encoder reads the query and the chunk together, so it should beat a vector
+computed without ever seeing the query. on this corpus it did not:
+
+```
+                                  recall@1  recall@3  recall@10     MRR
+  no rerank                           0.83      0.92       0.92   0.870
+  ms-marco-MiniLM-L-6-v2              0.78      0.86       0.92   0.828
+  jina-reranker-v1-turbo-en           0.69      0.83       0.92   0.775
+  jina-reranker-v2-base-multilingual  0.78      0.86       0.97   0.824
+```
+
+all three are trained on prose retrieval and code is out of distribution for them.
+the multilingual one earns something in exactly one place — it lifts correct files
+out of the tail of the shortlist into the top ten, 0.92 to 0.97 — and pays for it
+in precision at one and 2.5 seconds a query. so it ships off by default, with the
+numbers next to the flag:
+
+```bash
+fyc find "..." --rerank
+fyc eval my_cases.json --rerank      # settle it on your corpus, not mine
 ```
 
 ## models
@@ -188,7 +217,8 @@ unknown extensions still get indexed through the line-window fallback.
 ## development
 
 ```bash
-pytest                     # 67 tests, all on the hash provider, no network
+pytest                     # 96 tests on the hash provider — offline, deterministic
+FYC_TEST_REAL_MODEL=1 pytest tests/test_real_model.py   # the real model, ~220mb
 cd examples/demo_repo && fyc index && fyc find "checking the password on sign in"
 ```
 
@@ -199,6 +229,31 @@ re-records the gif at the top from live output.
 `store` is sqlite, `search` is the two retrievers and the blend, `evaluate` is
 recall and mrr, `diagnose` is `doctor`, `mcp_server` is the agent surface, `cli`
 is yours. see `contributing.md`.
+
+## prior art
+
+this is a crowded idea and pretending otherwise would be silly. the neighbours
+worth knowing, and what they do better:
+
+- [CodeRAG](https://github.com/Neverdecel/CodeRAG) — the closest match. tree-sitter
+  chunking, hybrid dense + bm25, incremental, mcp, and its own eval harness with
+  more metrics than this one. also ships reranking and a rest api.
+- [claude-context](https://github.com/zilliztech/claude-context) — the same idea for
+  agents, at a hundred times the mindshare. needs milvus and an embedding provider.
+- [chunkhound](https://github.com/chunkhound/chunkhound) — duckdb + hnsw, git-history
+  search, multi-hop retrieval. its good path wants an api key or ollama.
+- [seagoat](https://github.com/kantord/SeaGOAT) — local-first, chromadb, unions
+  vector hits with ripgrep. runs a daemon per repository, no mcp.
+- [qmd](https://github.com/tobi/qmd) — same storage stack exactly (fts5 + sqlite-vec
+  + rrf + local model + mcp), aimed at notes rather than code.
+- [ripgrep](https://github.com/BurntSushi/ripgrep) — wins outright on every query
+  where you know the string. that is most queries. this tool is for the rest.
+
+what is actually different here: the enrichment step is explicit and documented
+rather than incidental, the blend weight and the per-file cap were chosen by
+measurement with the losing configurations published, bm25-only candidates get an
+exact cosine before ranking, and the whole thing is one sqlite file with no server,
+no daemon, no vector database and no api key.
 
 ## next
 

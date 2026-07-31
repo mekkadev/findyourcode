@@ -78,10 +78,20 @@ def evaluate(
     limit: int = 10,
     mode: str = "hybrid",
     fusion: str = "",
+    reranker=None,
 ) -> Report:
     report = Report()
     for case in cases:
-        hits = search(store, embedder, case.query, cfg, limit=limit, mode=mode, fusion=fusion)
+        hits = search(
+            store,
+            embedder,
+            case.query,
+            cfg,
+            limit=limit,
+            mode=mode,
+            fusion=fusion,
+            reranker=reranker,
+        )
         rank = None
         for position, hit in enumerate(hits, 1):
             if any(marker in hit.row.rel for marker in case.expect):

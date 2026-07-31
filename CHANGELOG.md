@@ -24,6 +24,14 @@ notable changes, newest first. semver.
   it for real inside a pty — the gif is the tool's own output, not a mock-up.
 - an svg header and a social preview card under `docs/`.
 
+- `--rerank`, a cross-encoder second pass over the shortlist. off by default
+  because it was measured and it loses: recall@1 drops from 0.83 to 0.78 with
+  every reranker tried. it earns recall@10 0.97 against 0.92, so the flag stays,
+  with the numbers beside it.
+- one opt-in test against the real embedding model, so the path a user actually
+  takes is not left entirely to the deterministic stand-in.
+- a prior-art section naming the neighbours and what they do better.
+
 ### fixed
 
 - a query with no word characters (`()`, `...`, `&&`, or an empty argument)
