@@ -75,6 +75,35 @@ def search(
     return _dedupe(ranked)[:limit]
 
 
+def similar_to(
+    store: Store,
+    location: str,
+    cfg: Config,
+    limit: int = 10,
+    filters: Filters | None = None,
+    same_file: bool = False,
+) -> tuple[Row | None, list[Hit]]:
+    """Neighbours of an indexed chunk, addressed as `path` or `path:line`."""
+    anchor = store.chunk_at(location)
+    if anchor is None:
+        return None, []
+
+    vectors = store.vectors_for([anchor.id])
+    if anchor.id not in vectors:
+        return anchor, []
+
+    depth = max(limit * cfg.oversample, 50)
+    dense = store.search_vector(vectors[anchor.id], depth, filters or Filters())
+    rows = store.rows([cid for cid, _ in dense])
+
+    hits = [
+        Hit(row=rows[cid], score=score, semantic=score, semantic_rank=rank)
+        for rank, (cid, score) in enumerate(dense, 1)
+        if cid in rows and cid != anchor.id and (same_file or rows[cid].rel != anchor.rel)
+    ]
+    return anchor, _dedupe(hits)[:limit]
+
+
 def _fill_missing_semantics(store: Store, hits: dict[int, Hit], query_vector) -> None:
     """Lexical-only candidates have no cosine yet — fetch their vectors and score them."""
     missing = [cid for cid, hit in hits.items() if hit.semantic is None]

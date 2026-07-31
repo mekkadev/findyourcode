@@ -34,7 +34,7 @@ def render(hits: list[Hit], snippet_lines: int = 8, explain: bool = False, color
     for i, hit in enumerate(hits, 1):
         row = hit.row
         where = f"{row.rel}:{row.start_line}-{row.end_line}"
-        label = " ".join(p for p in (row.kind, _symbol(row)) if p)
+        label = " ".join(p for p in (row.kind, symbol_of(row)) if p)
         head = f"{c['score']}{i:>2}.{c['reset']} {c['path']}{where}{c['reset']}"
         if label:
             head += f"  {c['meta']}{label}{c['reset']}"
@@ -61,6 +61,16 @@ def render(hits: list[Hit], snippet_lines: int = 8, explain: bool = False, color
     return "\n".join(out).rstrip()
 
 
+def as_paths(hits: list[Hit], with_line: bool = True) -> str:
+    """One location per line — meant for `| xargs`, `$EDITOR` and fzf."""
+    seen: list[str] = []
+    for hit in hits:
+        entry = f"{hit.row.rel}:{hit.row.start_line}" if with_line else hit.row.rel
+        if entry not in seen:
+            seen.append(entry)
+    return "\n".join(seen)
+
+
 def as_json(hits: list[Hit]) -> str:
     payload = [
         {
@@ -69,7 +79,7 @@ def as_json(hits: list[Hit]) -> str:
             "end_line": h.row.end_line,
             "lang": h.row.lang,
             "kind": h.row.kind,
-            "symbol": _symbol(h.row),
+            "symbol": symbol_of(h.row),
             "score": round(h.score, 6),
             "semantic": None if h.semantic is None else round(h.semantic, 6),
             "lexical": None if h.lexical is None else round(h.lexical, 6),
@@ -80,7 +90,7 @@ def as_json(hits: list[Hit]) -> str:
     return json.dumps(payload, ensure_ascii=False, indent=2)
 
 
-def _symbol(row) -> str:
+def symbol_of(row) -> str:
     if row.parent and row.symbol:
         return f"{row.parent}.{row.symbol}"
     return row.symbol or row.parent

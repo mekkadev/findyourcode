@@ -359,17 +359,33 @@ class Store:
         if not ids:
             return {}
         marks = ",".join("?" * len(ids))
-        out = {}
-        for r in self.db.execute(
+        rows = self.db.execute(
             f"SELECT id, rel, lang, kind, symbol, parent, start_line, end_line, code "
             f"FROM chunks WHERE id IN ({marks})",
             ids,
-        ):
-            out[r["id"]] = Row(
-                r["id"], r["rel"], r["lang"], r["kind"], r["symbol"], r["parent"],
-                r["start_line"], r["end_line"], r["code"],
-            )
-        return out
+        )
+        return {r["id"]: _to_row(r) for r in rows}
+
+    def chunk_at(self, location: str) -> Row | None:
+        """Resolve `path` or `path:line` to the chunk that covers it."""
+        path, _, line_text = location.rpartition(":")
+        if path and line_text.isdigit():
+            line = int(line_text)
+        else:
+            path, line = location, None
+
+        pattern = f"%{path.lstrip('./')}"
+        if line is None:
+            row = self.db.execute(
+                "SELECT * FROM chunks WHERE rel LIKE ? ORDER BY start_line LIMIT 1", (pattern,)
+            ).fetchone()
+        else:
+            row = self.db.execute(
+                "SELECT * FROM chunks WHERE rel LIKE ? AND start_line <= ? AND end_line >= ? "
+                "ORDER BY end_line - start_line LIMIT 1",
+                (pattern, line, line),
+            ).fetchone()
+        return _to_row(row) if row else None
 
     def stats(self) -> dict:
         def one(sql: str) -> int:
@@ -403,6 +419,13 @@ class Store:
             matrix = np.vstack(vectors) if vectors else np.zeros((0, max(dim, 1)), dtype=np.float32)
             self._matrix = (np.asarray(ids, dtype=np.int64), matrix)
         return self._matrix
+
+
+def _to_row(r: sqlite3.Row) -> Row:
+    return Row(
+        r["id"], r["rel"], r["lang"], r["kind"], r["symbol"], r["parent"],
+        r["start_line"], r["end_line"], r["code"],
+    )
 
 
 def _load_sqlite_vec(db: sqlite3.Connection) -> bool:

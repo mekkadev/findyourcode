@@ -1,4 +1,4 @@
-"""Command line interface: fyc index / find / status / clear / providers."""
+"""Command line interface: fyc index / find / similar / status / clear / providers."""
 
 from __future__ import annotations
 
@@ -9,9 +9,9 @@ import sys
 from . import __version__
 from .config import load_config
 from .embeddings import PROVIDERS, get_embedder
-from .format import as_json, render, use_color
+from .format import as_json, as_paths, render, symbol_of, use_color
 from .indexer import build_index
-from .search import search
+from .search import search, similar_to
 from .store import Filters, Store
 
 
@@ -42,16 +42,19 @@ def _build_parser() -> argparse.ArgumentParser:
 
     find = sub.add_parser("find", help="search the index")
     find.add_argument("query", nargs="+")
-    find.add_argument("-n", "--limit", type=int, default=10)
-    find.add_argument("--lang", action="append", help="filter by language (repeatable)")
-    find.add_argument("--path", action="append", help="filter by path substring (repeatable)")
-    find.add_argument("--kind", action="append", help="filter by kind: function, class, method, ...")
+    _add_result_options(find)
     find.add_argument("--mode", choices=["hybrid", "semantic", "lexical"], default="hybrid")
     find.add_argument("--fusion", choices=["blend", "rrf"], help="how the two rankings are merged")
-    find.add_argument("-L", "--lines", type=int, default=8, help="snippet lines (0 = full chunk)")
     find.add_argument("--explain", action="store_true", help="show per-retriever ranks")
-    find.add_argument("--json", action="store_true")
     find.set_defaults(handler=cmd_find)
+
+    similar = sub.add_parser("similar", help="find code similar to a place in the codebase")
+    similar.add_argument("location", help="path or path:line")
+    similar.add_argument(
+        "--same-file", action="store_true", help="also return chunks from the same file"
+    )
+    _add_result_options(similar)
+    similar.set_defaults(handler=cmd_similar)
 
     status = sub.add_parser("status", help="show index statistics")
     status.set_defaults(handler=cmd_status)
@@ -62,6 +65,22 @@ def _build_parser() -> argparse.ArgumentParser:
     providers = sub.add_parser("providers", help="list embedding providers")
     providers.set_defaults(handler=cmd_providers)
     return parser
+
+
+def _add_result_options(sub: argparse.ArgumentParser) -> None:
+    sub.add_argument("-n", "--limit", type=int, default=10)
+    sub.add_argument("--lang", action="append", help="filter by language (repeatable)")
+    sub.add_argument("--path", action="append", help="filter by path substring (repeatable)")
+    sub.add_argument("--kind", action="append", help="filter by kind: function, class, method, ...")
+    sub.add_argument("-L", "--lines", type=int, default=8, help="snippet lines (0 = full chunk)")
+    sub.add_argument(
+        "-f",
+        "--format",
+        choices=["pretty", "paths", "files", "json"],
+        default="pretty",
+        help="pretty (default), paths (path:line), files, or json",
+    )
+    sub.add_argument("--json", action="store_true", help="alias for --format json")
 
 
 def cmd_index(args) -> int:
@@ -112,17 +131,38 @@ def cmd_find(args) -> int:
         " ".join(args.query),
         cfg,
         limit=args.limit,
-        filters=Filters(langs=args.lang, paths=args.path, kinds=args.kind),
+        filters=_filters(args),
         mode=args.mode,
         fusion=args.fusion or "",
     )
     store.close()
+    return _emit(hits, args, explain=args.explain)
 
-    if args.json:
-        print(as_json(hits))
-    else:
-        print(render(hits, snippet_lines=args.lines, explain=args.explain, color=use_color()))
-    return 0 if hits else 1
+
+def cmd_similar(args) -> int:
+    cfg = load_config(args.root)
+    if not cfg.db_path.exists():
+        print("no index here — run `fyc index` first", file=sys.stderr)
+        return 2
+
+    store = Store(cfg.db_path)
+    anchor, hits = similar_to(
+        store,
+        args.location,
+        cfg,
+        limit=args.limit,
+        filters=_filters(args),
+        same_file=args.same_file,
+    )
+    store.close()
+
+    if anchor is None:
+        print(f"nothing indexed at '{args.location}'", file=sys.stderr)
+        return 2
+    if _output_format(args) == "pretty":
+        label = " ".join(p for p in (anchor.kind, symbol_of(anchor)) if p)
+        print(f"like {anchor.rel}:{anchor.start_line}-{anchor.end_line} {label}\n", file=sys.stderr)
+    return _emit(hits, args)
 
 
 def cmd_status(args) -> int:
@@ -159,6 +199,27 @@ def cmd_providers(args) -> int:
     for name, (_, _, description) in PROVIDERS.items():
         print(f"{name:<8} {description}")
     return 0
+
+
+def _filters(args) -> Filters:
+    return Filters(langs=args.lang, paths=args.path, kinds=args.kind)
+
+
+def _output_format(args) -> str:
+    return "json" if args.json else args.format
+
+
+def _emit(hits, args, explain: bool = False) -> int:
+    style = _output_format(args)
+    if style == "json":
+        print(as_json(hits))
+    elif style in ("paths", "files"):
+        text = as_paths(hits, with_line=style == "paths")
+        if text:
+            print(text)
+    else:
+        print(render(hits, snippet_lines=args.lines, explain=explain, color=use_color()))
+    return 0 if hits else 1
 
 
 def _parse_signature(signature: str | None, cfg) -> tuple[str, str]:
