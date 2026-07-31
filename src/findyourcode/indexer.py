@@ -167,8 +167,6 @@ def _prepare(item: tuple[SourceFile, str], cfg: Config, stats: IndexStats) -> _U
         chunk.sha = chunk_sha(embed_text)
         kept.append(chunk)
         texts.append(embed_text)
-    if not kept:
-        return None
     return _Unit(source, sha, kept, texts)
 
 
@@ -193,7 +191,11 @@ def _flush(store: Store, embedder: Embedder, buffer: list[_Unit], stats: IndexSt
         stats.embedded += len(missing)
 
     for unit in buffer:
-        matrix = np.vstack([cache[chunk.sha] for chunk in unit.chunks])
+        matrix = (
+            np.vstack([cache[chunk.sha] for chunk in unit.chunks])
+            if unit.chunks
+            else np.zeros((0, embedder.dim), dtype=np.float32)
+        )
         store.add_file(
             unit.source.rel,
             unit.sha,

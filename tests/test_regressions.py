@@ -272,3 +272,23 @@ def test_a_file_the_parser_chokes_on_is_reported_and_not_left_stale(repo, monkey
     assert not any(h.row.rel == "bad.py" for h in search(store, embedder, "beta", cfg))
     assert any(h.row.rel == "ok.py" for h in search(store, embedder, "alpha", cfg))
     store.close()
+
+
+def test_a_file_that_yields_no_chunks_is_still_recorded(repo):
+    """Otherwise every later run calls it new and doctor never reports a fresh index."""
+    from findyourcode.diagnose import run as diagnose
+
+    root = repo({"real.py": "def alpha():\n    return 1\n", "blank.py": "   \n\n"})
+    cfg = load_config(root, provider="hash")
+    embedder = get_embedder(cfg.provider)
+    store = Store(cfg.db_path)
+
+    first = build_index(cfg, embedder, store)
+    assert first.indexed == 2 and first.chunks == 1
+
+    second = build_index(cfg, embedder, store)
+    assert second.indexed == 0
+    assert second.unchanged == 2
+    store.close()
+
+    assert {c.name: c for c in diagnose(cfg)}["freshness"].ok

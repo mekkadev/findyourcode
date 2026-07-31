@@ -34,6 +34,9 @@ notable changes, newest first. semver.
 
 ### fixed
 
+- a file that produced no chunks — an empty file, a file of only whitespace — was
+  never recorded, so every later run counted it as new and `fyc doctor` could
+  never report the index as fresh.
 - `fyc --version` reported 0.2.0 while the distribution was 0.3.0. the version is
   read from the installed metadata now, so the two cannot drift again.
 - the sdist carried `tests/` without `conftest.py`, so the suite it shipped could

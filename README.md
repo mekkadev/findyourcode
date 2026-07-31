@@ -217,7 +217,7 @@ unknown extensions still get indexed through the line-window fallback.
 ## development
 
 ```bash
-pytest                     # 103 tests on the hash provider — offline, deterministic
+pytest                     # 104 tests on the hash provider — offline, deterministic
 FYC_TEST_REAL_MODEL=1 pytest tests/test_real_model.py   # the real model, ~220mb
 cd examples/demo_repo && fyc index && fyc find "checking the password on sign in"
 ```
