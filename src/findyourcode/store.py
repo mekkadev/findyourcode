@@ -12,6 +12,10 @@ from .chunker import Chunk
 
 SCHEMA_VERSION = "1"
 
+# sqlite-vec refuses a knn query above this k; beyond it we answer exactly instead.
+VEC_MAX_K = 4096
+EXACT_SCAN_LIMIT = 20_000
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 
@@ -95,6 +99,13 @@ class Store:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.db = sqlite3.connect(self.path)
         self.db.row_factory = sqlite3.Row
+        try:
+            self.db.execute("SELECT count(*) FROM sqlite_master").fetchone()
+        except sqlite3.DatabaseError as exc:
+            raise SystemExit(
+                f"{self.path} is not a readable index ({exc}).\n"
+                f"Delete it with `fyc clear` and index again."
+            ) from exc
         self.db.execute("PRAGMA auto_vacuum=INCREMENTAL")
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("PRAGMA synchronous=NORMAL")
@@ -313,8 +324,13 @@ class Store:
         if allowed is not None and not allowed:
             return []
 
+        # A filter that selects a small slice is answered exactly: an approximate
+        # global top-N may not contain a single row that passes it.
+        if allowed is not None and len(allowed) <= EXACT_SCAN_LIMIT:
+            return self._exact_top_k(query, k, sorted(allowed))
+
         if self._vec_ok:
-            fetch = k if allowed is None else min(max(k * 8, 200), 20000)
+            fetch = min(k if allowed is None else max(k * 8, 200), VEC_MAX_K)
             rows = self.db.execute(
                 "SELECT rowid AS id, distance FROM vec_chunks "
                 "WHERE embedding MATCH ? AND k = ? ORDER BY distance",
@@ -335,6 +351,20 @@ class Store:
         top = np.argpartition(-scores, min(k, len(scores) - 1))[:k]
         top = top[np.argsort(-scores[top])]
         return [(int(ids[i]), float(scores[i])) for i in top if np.isfinite(scores[i])]
+
+    def _exact_top_k(self, query: np.ndarray, k: int, ids: list[int]) -> list[tuple[int, float]]:
+        vector = np.asarray(query, dtype=np.float32)
+        scored: list[tuple[int, float]] = []
+        for start in range(0, len(ids), 900):
+            batch = ids[start : start + 900]
+            found = self.vectors_for(batch)
+            if not found:
+                continue
+            keys = list(found)
+            matrix = np.vstack([found[cid] for cid in keys])
+            scored.extend(zip(keys, (matrix @ vector).tolist()))
+        scored.sort(key=lambda pair: -pair[1])
+        return scored[:k]
 
     def search_lexical(self, query: str, k: int, filters: Filters) -> list[tuple[int, float]]:
         match = _fts_query(query)

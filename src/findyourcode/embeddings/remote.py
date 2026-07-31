@@ -52,7 +52,7 @@ class _HttpEmbedder(Embedder):
             },
         )
         last: Exception | None = None
-        for attempt in range(5):
+        for attempt in range(4):
             try:
                 with urllib.request.urlopen(request, timeout=120) as response:
                     data = json.loads(response.read())
@@ -63,10 +63,14 @@ class _HttpEmbedder(Embedder):
             except urllib.error.HTTPError as exc:
                 last = exc
                 if exc.code not in (408, 429, 500, 502, 503, 504):
-                    raise
+                    detail = exc.read().decode("utf-8", "replace")[:200].strip()
+                    raise RuntimeError(
+                        f"{self.name}: HTTP {exc.code} from {self.url}"
+                        f"{' — ' + detail if detail else ''}"
+                    ) from exc
             except urllib.error.URLError as exc:
                 last = exc
-            time.sleep(2**attempt)
+            time.sleep(min(2**attempt, 8))
         raise RuntimeError(f"{self.name}: embedding request failed: {last}")
 
     def embed_documents(self, texts: list[str]) -> np.ndarray:

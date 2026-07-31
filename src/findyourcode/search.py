@@ -70,7 +70,7 @@ def search(
     if fusion == "rrf":
         _score_rrf(hits, cfg)
     else:
-        _score_blend(hits, cfg, lexical_used=bool(sparse))
+        _score_blend(hits, cfg, lexical_used=bool(sparse), semantic_used=bool(dense))
 
     ranked = sorted(hits.values(), key=lambda h: -h.score)
     cap = cfg.per_file if per_file is None else per_file
@@ -113,10 +113,16 @@ def _fill_missing_semantics(store: Store, hits: dict[int, Hit], query_vector) ->
         hits[cid].semantic = float(np.dot(vector, query_vector))
 
 
-def _score_blend(hits: dict[int, Hit], cfg: Config, lexical_used: bool) -> None:
+def _score_blend(
+    hits: dict[int, Hit], cfg: Config, lexical_used: bool, semantic_used: bool = True
+) -> None:
     semantics = _minmax([h.semantic for h in hits.values()])
     lexicals = _minmax([h.lexical for h in hits.values()])
-    alpha = cfg.alpha if lexical_used else 1.0
+    alpha = cfg.alpha
+    if not lexical_used:
+        alpha = 1.0
+    elif not semantic_used:
+        alpha = 0.0
     for hit, sem, lex in zip(hits.values(), semantics, lexicals):
         hit.score = alpha * sem + (1.0 - alpha) * lex
 
@@ -142,6 +148,16 @@ def _minmax(values: list[float | None]) -> list[float]:
     return [0.0 if v is None else (v - low) / span for v in values]
 
 
+def _overlap_ratio(row: Row, start: int, end: int) -> float:
+    """Consecutive windows of one long function share an overlap by design — only
+    call two chunks duplicates when most of the smaller one is inside the other."""
+    shared = min(row.end_line, end) - max(row.start_line, start) + 1
+    if shared <= 0:
+        return 0.0
+    shortest = min(row.end_line - row.start_line, end - start) + 1
+    return shared / shortest
+
+
 def _dedupe(hits: list[Hit], per_file: int = 0) -> list[Hit]:
     """Drop overlapping spans, and keep one file from swallowing the whole page."""
     kept: list[Hit] = []
@@ -149,7 +165,7 @@ def _dedupe(hits: list[Hit], per_file: int = 0) -> list[Hit]:
     for hit in hits:
         row = hit.row
         seen = spans.setdefault(row.rel, [])
-        if any(row.start_line <= end and start <= row.end_line for start, end in seen):
+        if any(_overlap_ratio(row, start, end) > 0.5 for start, end in seen):
             continue
         if per_file and len(seen) >= per_file:
             continue

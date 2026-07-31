@@ -44,7 +44,8 @@ def render(hits: list[Hit], snippet_lines: int = 8, explain: bool = False, color
         if explain:
             parts = []
             if hit.semantic is not None:
-                parts.append(f"semantic #{hit.semantic_rank} ({hit.semantic:.3f})")
+                rank = f"#{hit.semantic_rank} " if hit.semantic_rank else "cosine "
+                parts.append(f"semantic {rank}({hit.semantic:.3f})")
             if hit.lexical is not None:
                 parts.append(f"lexical #{hit.lexical_rank} (bm25 {hit.lexical:.2f})")
             out.append(f"    {c['meta']}{' | '.join(parts) or 'no sub-scores'}{c['reset']}")

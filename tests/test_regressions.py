@@ -134,3 +134,69 @@ def test_git_listing_is_deduplicated(repo, cfg, monkeypatch):
 
     monkeypatch.setattr(walker, "_git_files", lambda root: ["a.py", "a.py", "a.py"])
     assert [f.rel for f in discover(cfg)] == ["a.py"]
+
+
+def test_knn_beyond_the_backend_limit(repo):
+    root = repo({"a.py": "def alpha():\n    return 1\n"})
+    cfg = load_config(root, provider="hash")
+    embedder = get_embedder(cfg.provider)
+    store = Store(cfg.db_path)
+    build_index(cfg, embedder, store)
+
+    from findyourcode.store import Filters
+
+    assert store.search_vector(embedder.embed_query("alpha"), 50_000, Filters()) != []
+    store.close()
+
+
+def test_narrow_filter_still_reaches_its_matches(repo):
+    files = {f"noise/mod_{i}.py": f"def unrelated_{i}():\n    return {i}\n" for i in range(60)}
+    files["rare/cache.rs"] = "fn evict_expired_entries() -> u8 {\n    1\n}\n"
+    root = repo(files)
+    cfg = load_config(root, provider="hash")
+    embedder = get_embedder(cfg.provider)
+    store = Store(cfg.db_path)
+    build_index(cfg, embedder, store)
+
+    from findyourcode.store import Filters
+
+    hits = search(store, embedder, "unrelated", cfg, filters=Filters(langs=["rust"]))
+    assert hits and all(h.row.lang == "rust" for h in hits)
+    store.close()
+
+
+def test_lexical_mode_uses_the_full_score_range(repo):
+    root = repo({"a.py": "def verify_password(login):\n    return login\n"})
+    cfg = load_config(root, provider="hash")
+    embedder = get_embedder(cfg.provider)
+    store = Store(cfg.db_path)
+    build_index(cfg, embedder, store)
+
+    hits = search(store, embedder, "verify password", cfg, mode="lexical")
+    assert hits and hits[0].score == pytest.approx(1.0)
+    store.close()
+
+
+def test_bm25_sees_the_tail_of_a_long_chunk(repo):
+    body = "\n".join(f"    step_{i} = {i}" for i in range(300))
+    root = repo({"long.py": f"def pipeline():\n{body}\n    return unmistakable_tail_marker\n"})
+    cfg = load_config(root, provider="hash")
+    embedder = get_embedder(cfg.provider)
+    store = Store(cfg.db_path)
+    build_index(cfg, embedder, store)
+
+    hits = search(store, embedder, "unmistakable_tail_marker", cfg, mode="lexical")
+    assert hits, "the identifier past the embedding-text cutoff must still be searchable"
+    store.close()
+
+
+def test_consecutive_windows_of_one_function_are_not_deduped(cfg):
+    from findyourcode.search import Hit, _dedupe
+    from findyourcode.store import Row
+
+    first = Hit(row=Row(1, "a.py", "python", "function", "f [1/2]", "", 1, 110, "x"), score=1.0)
+    second = Hit(row=Row(2, "a.py", "python", "function", "f [2/2]", "", 98, 208, "y"), score=0.9)
+    duplicate = Hit(row=Row(3, "a.py", "python", "function", "f", "", 1, 108, "x"), score=0.8)
+
+    kept = _dedupe([first, second, duplicate], per_file=0)
+    assert [h.row.id for h in kept] == [1, 2]

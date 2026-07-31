@@ -24,7 +24,17 @@ def main(argv: list[str] | None = None) -> int:
     if not getattr(args, "command", None):
         parser.print_help()
         return 1
-    return args.handler(args)
+    if not Path(args.root).is_dir():
+        print(f"'{args.root}' is not a directory", file=sys.stderr)
+        return 2
+    if getattr(args, "limit", 1) < 1:
+        print("--limit must be at least 1", file=sys.stderr)
+        return 2
+    try:
+        return args.handler(args)
+    except RuntimeError as exc:  # provider and transport failures
+        print(f"error: {exc}", file=sys.stderr)
+        return 3
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -210,7 +220,11 @@ def cmd_eval(args) -> int:
         print("no index here — run `fyc index` first", file=sys.stderr)
         return 2
 
-    cases = load_cases(Path(args.cases))
+    try:
+        cases = load_cases(Path(args.cases))
+    except (OSError, ValueError) as exc:
+        print(f"cannot read cases from '{args.cases}': {exc}", file=sys.stderr)
+        return 2
     store = Store(cfg.db_path)
     provider, model = _parse_signature(store.get_meta("signature"), cfg)
     embedder = _embedder(cfg, provider=provider, model=model)

@@ -73,5 +73,9 @@ def chunk_sha(embed_text: str) -> str:
 
 
 def lexical_text(chunk: Chunk, embed_text: str) -> str:
-    """Text fed to FTS5 — code plus split identifiers so BM25 sees both forms."""
-    return f"{chunk.rel} {chunk.symbol} {chunk.parent}\n{embed_text}"
+    """Text fed to FTS5: the whole chunk plus split identifiers, so BM25 sees both
+    forms. Unlike the embedding text this is not truncated — the tail of a long
+    function is exactly where a rare identifier tends to live."""
+    header = f"{chunk.rel} {chunk.symbol} {chunk.parent}"
+    names = " ".join(split_identifiers(chunk.code, limit=400))
+    return f"{header}\n{chunk.doc}\n{chunk.file_doc}\n{names}\n{chunk.code}"
