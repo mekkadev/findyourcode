@@ -49,8 +49,8 @@ def test_chunker_survives_broken_and_empty_sources(cfg):
     broken = chunk_source("broken.py", "python", "def f(:\n  x = ((((\nclass ???", cfg)
     assert broken and broken[0].code.startswith("def f(:")
 
-    unicode_chunks = chunk_source("u.py", "python", "def привет_мир():\n    return 'ok'\n", cfg)
-    assert unicode_chunks[0].symbol == "привет_мир"
+    unicode_chunks = chunk_source("u.py", "python", "def naïve_size():\n    return 'ok'\n", cfg)
+    assert unicode_chunks[0].symbol == "naïve_size"
 
 
 def test_language_without_recognised_definitions_falls_back(cfg):

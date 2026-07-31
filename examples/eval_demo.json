@@ -1,14 +1,14 @@
 [
-  { "query": "где происходит авторизация пользователя", "expect": "api/session.py" },
-  { "query": "проверка пароля при входе", "expect": "api/session.py" },
-  { "query": "выдача токена сессии", "expect": "api/session.py" },
-  { "query": "разграничение прав доступа по ролям", "expect": "web/middleware.ts" },
-  { "query": "middleware для проверки заголовка запроса", "expect": "web/middleware.ts" },
-  { "query": "как мы списываем деньги с карты", "expect": "billing/charge.go" },
-  { "query": "возврат средств покупателю", "expect": "billing/charge.go" },
-  { "query": "рисование графика на канвасе", "expect": "ui/chart.js" },
-  { "query": "форматирование подписей на оси", "expect": "ui/chart.js" },
-  { "query": "кэш с истечением по времени", "expect": "store/cache.rs" },
-  { "query": "where do we validate credentials", "expect": "api/session.py" },
-  { "query": "retry a failed payment capture", "expect": "billing/charge.go" }
+  { "query": "where do we authenticate users", "expect": "api/session.py" },
+  { "query": "checking the password on sign in", "expect": "api/session.py" },
+  { "query": "issuing a session token", "expect": "api/session.py" },
+  { "query": "restricting access by role", "expect": "web/middleware.ts" },
+  { "query": "middleware that inspects a request header", "expect": "web/middleware.ts" },
+  { "query": "how we take money from a card", "expect": "billing/charge.go" },
+  { "query": "refunding a customer", "expect": "billing/charge.go" },
+  { "query": "drawing a chart on a canvas", "expect": "ui/chart.js" },
+  { "query": "formatting axis labels", "expect": "ui/chart.js" },
+  { "query": "cache that expires entries after a while", "expect": "store/cache.rs" },
+  { "query": "retry a failed payment capture", "expect": "billing/charge.go" },
+  { "query": "reject an expired or forged ticket", "expect": "web/middleware.ts" }
 ]

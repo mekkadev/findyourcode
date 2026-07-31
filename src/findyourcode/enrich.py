@@ -2,7 +2,7 @@
 
 Identifiers carry most of the meaning in source code, but an embedding model only
 sees it when they are split into words: `checkUserCredentials` -> `check user
-credentials` is what makes a query like "где происходит авторизация" match.
+credentials` is what lets a query like "who is allowed in" reach it.
 """
 
 from __future__ import annotations
