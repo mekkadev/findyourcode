@@ -73,5 +73,23 @@ def test_unknown_language_falls_back_to_windows(cfg):
     assert [c.symbol for c in chunks] == ["", "Title", "Second"] or len(chunks) >= 2
 
 
+def test_module_summary_is_attached_to_every_chunk(cfg):
+    source = '"""Command-line parsing library.\n\nMore prose.\n"""\n\ndef parse():\n    return 1\n'
+    chunks = chunk_source("cli.py", "python", source, cfg)
+    assert chunks
+    assert all(c.file_doc.startswith("Command-line parsing library.") for c in chunks)
+
+
+def test_function_docstring_is_not_mistaken_for_a_module_summary(cfg):
+    source = 'def only(x):\n    """Doc that belongs to the function."""\n    return x\n'
+    assert all(c.file_doc == "" for c in chunk_source("f.py", "python", source, cfg))
+
+
+def test_leading_comments_are_used_when_there_is_no_docstring(cfg):
+    source = "// Package billing charges cards.\n\nfunc Collect() {}\n"
+    chunks = chunk_source("charge.go", "go", source, cfg)
+    assert chunks[0].file_doc == "Package billing charges cards."
+
+
 def c_head(chunk):
     return chunk.code.split("\n")[0]

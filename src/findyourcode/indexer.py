@@ -62,18 +62,17 @@ def build_index(
     stats.scanned = len(files)
     known = store.file_states()
     seen: set[str] = set()
-    todo: list[tuple[SourceFile, str, str]] = []
+    todo: list[tuple[SourceFile, str]] = []
 
     for source in files:
-        text = read_source(source.path)
-        if text is None:
+        sha = _file_sha(source.path)
+        if sha is None:
             continue
         seen.add(source.rel)
-        sha = hashlib.sha256(text.encode("utf-8")).hexdigest()[:32]
         if not reindex and known.get(source.rel) == sha:
             stats.unchanged += 1
             continue
-        todo.append((source, sha, text))
+        todo.append((source, sha))
 
     stale = [rel for rel in known if rel not in seen]
     if stale:
@@ -108,8 +107,23 @@ def build_index(
     return stats
 
 
-def _prepare(item: tuple[SourceFile, str, str], cfg: Config, stats: IndexStats) -> _Unit | None:
-    source, sha, text = item
+def _file_sha(path) -> str | None:
+    """Hash raw bytes so file contents never have to be held in memory to decide staleness."""
+    digest = hashlib.sha256()
+    try:
+        with open(path, "rb") as fh:
+            for block in iter(lambda: fh.read(1 << 20), b""):
+                digest.update(block)
+    except OSError:
+        return None
+    return digest.hexdigest()[:32]
+
+
+def _prepare(item: tuple[SourceFile, str], cfg: Config, stats: IndexStats) -> _Unit | None:
+    source, sha = item
+    text = read_source(source.path)
+    if text is None:
+        return None
     try:
         chunks = chunk_source(source.rel, source.lang, text, cfg)
     except Exception as exc:  # a broken grammar must not kill the run

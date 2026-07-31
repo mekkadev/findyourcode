@@ -28,6 +28,10 @@ _DECL_TYPES = {
     "field_declaration",
 }
 _CALLABLE_HINTS = ("function", "arrow", "lambda", "closure", "class", "struct", "interface")
+_FIRST_DEFINITION = re.compile(
+    r"^\s*(?:async\s+)?(?:def|class|func|function|impl|trait|struct|type|public|private|export)\b",
+    re.MULTILINE,
+)
 _HEADING = re.compile(r"^#{1,6}\s+\S")
 
 _KIND_BY_TYPE = (
@@ -65,26 +69,34 @@ class Chunk:
     end_line: int
     code: str
     doc: str = ""
+    file_doc: str = ""
     sha: str = ""
 
 
 def chunk_source(rel: str, lang: str, text: str, cfg: Config) -> list[Chunk]:
     parser = None if lang in TEXTUAL_LANGS else get_parser(lang)
     lines = text.split("\n")
-    if parser is None:
-        return _chunk_textual(rel, lang, lines, cfg)
+    chunks = None
 
-    try:
-        tree = parser.parse(text.encode("utf-8"))
-    except Exception:
-        return _chunk_textual(rel, lang, lines, cfg)
+    if parser is not None:
+        try:
+            tree = parser.parse(text.encode("utf-8"))
+        except Exception:
+            tree = None
+        if tree is not None:
+            builder = _AstChunker(rel, lang, lines, text.encode("utf-8"), cfg)
+            builder.walk(tree.root_node, [])
+            builder.collect_gaps()
+            if builder.chunks:
+                chunks = sorted(builder.chunks, key=lambda c: (c.start_line, c.end_line))
 
-    builder = _AstChunker(rel, lang, lines, text.encode("utf-8"), cfg)
-    builder.walk(tree.root_node, [])
-    builder.collect_gaps()
-    if not builder.chunks and text.strip():
-        return _chunk_textual(rel, lang, lines, cfg)
-    return sorted(builder.chunks, key=lambda c: (c.start_line, c.end_line))
+    if chunks is None:
+        chunks = _chunk_textual(rel, lang, lines, cfg)
+
+    file_doc = _file_summary(lines)
+    for chunk in chunks:
+        chunk.file_doc = file_doc
+    return chunks
 
 
 class _AstChunker:
@@ -297,6 +309,27 @@ def _body_of(node):
         if child.type.endswith(("_body", "block", "declaration_list", "statement_block")):
             return child
     return None
+
+
+def _file_summary(lines: list[str], limit: int = 200) -> str:
+    """What the file as a whole is about — a strong topical signal for every chunk in it."""
+    head = "\n".join(lines[:120])
+    body_starts = _FIRST_DEFINITION.search(head)
+    opening = re.search(r'("""|\'\'\')', head)
+    if opening and not (body_starts and body_starts.start() < opening.start()):
+        rest = head[opening.end() :]
+        closing = rest.find(opening.group(1))
+        summary = " ".join((rest if closing < 0 else rest[:closing]).split())[:limit]
+        if summary:
+            return summary
+
+    comments = []
+    for line in lines[:20]:
+        if _COMMENT_LINE.match(line):
+            comments.append(re.sub(r"^\s*(#+|//+|/\*+|\*+/?|--|;;|<!--)\s?", "", line).strip())
+        elif line.strip():
+            break
+    return " ".join(" ".join(comments).split())[:limit]
 
 
 def _extract_doc(lines: list[str], start: int, end: int) -> str:

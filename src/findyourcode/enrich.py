@@ -55,6 +55,8 @@ def build_embed_text(chunk: Chunk, max_chars: int = 4000) -> str:
     doc = " ".join(chunk.doc.split())
     if doc:
         parts.append(f"about: {doc[:400]}")
+    if chunk.file_doc and chunk.file_doc != doc:
+        parts.append(f"module: {chunk.file_doc}")
 
     signature = chunk.code.strip().split("\n", 1)[0][:200]
     names = split_identifiers(f"{full_symbol} {signature} {chunk.code}", limit=60)
