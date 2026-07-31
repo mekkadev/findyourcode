@@ -97,7 +97,7 @@ def build_index(
                 if buffered_chunks >= flush_at:
                     _flush(store, embedder, buffer, stats)
                     buffer, buffered_chunks = [], 0
-                    say(f"indexed {stats.indexed}/{len(todo)} files, {stats.chunks} chunks")
+                    say(_progress_line(stats, len(todo), started))
 
     _flush(store, embedder, buffer, stats)
     store.prune_cache()
@@ -106,6 +106,27 @@ def build_index(
 
     stats.elapsed = time.time() - started
     return stats
+
+
+def _progress_line(stats: IndexStats, total: int, started: float) -> str:
+    elapsed = max(time.time() - started, 1e-6)
+    rate = stats.chunks / elapsed
+    left = ""
+    if stats.indexed and stats.indexed < total:
+        remaining = (total - stats.indexed) * (elapsed / stats.indexed)
+        left = f" · ~{_duration(remaining)} left"
+    return (
+        f"indexing {stats.indexed}/{total} files · {stats.chunks} chunks"
+        f" · {rate:.0f} chunks/s{left}"
+    )
+
+
+def _duration(seconds: float) -> str:
+    if seconds < 90:
+        return f"{seconds:.0f}s"
+    if seconds < 5400:
+        return f"{seconds / 60:.0f}m"
+    return f"{seconds / 3600:.1f}h"
 
 
 def _file_sha(path) -> str | None:

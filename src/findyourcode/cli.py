@@ -92,10 +92,11 @@ def cmd_index(args) -> int:
     )
     embedder = _embedder(cfg)
     store = Store(cfg.db_path)
-    say = (lambda msg: None) if args.quiet else (lambda msg: print(msg, file=sys.stderr))
+    say = _reporter(quiet=args.quiet)
     say(f"provider {embedder.signature}, vectors via {store.vector_backend}")
 
     stats = build_index(cfg, embedder, store, reindex=args.reindex, progress=say)
+    say(None)
     store.close()
 
     if stats.errors and not args.quiet:
@@ -199,6 +200,28 @@ def cmd_providers(args) -> int:
     for name, (_, _, description) in PROVIDERS.items():
         print(f"{name:<8} {description}")
     return 0
+
+
+def _reporter(quiet: bool):
+    """Progress goes to stderr; on a terminal it repaints one line instead of scrolling."""
+    live = sys.stderr.isatty()
+    state = {"dirty": False}
+
+    def say(message: str | None) -> None:
+        if quiet:
+            return
+        if message is None:
+            if state["dirty"]:
+                print(file=sys.stderr)
+                state["dirty"] = False
+            return
+        if live:
+            print(f"\r\033[K{message}", end="", file=sys.stderr, flush=True)
+            state["dirty"] = True
+        else:
+            print(message, file=sys.stderr)
+
+    return say
 
 
 def _filters(args) -> Filters:
