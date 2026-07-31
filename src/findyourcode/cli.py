@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import shutil
 import sys
+import time
 from pathlib import Path
 
 from . import __version__
@@ -39,6 +40,8 @@ def _build_parser() -> argparse.ArgumentParser:
     index = sub.add_parser("index", help="build or update the index")
     index.add_argument("--reindex", action="store_true", help="drop the index and start over")
     index.add_argument("--workers", type=int, help="parser threads")
+    index.add_argument("--watch", action="store_true", help="keep the index fresh until Ctrl-C")
+    index.add_argument("--interval", type=float, default=2.0, help="seconds between watch passes")
     index.add_argument("-q", "--quiet", action="store_true")
     index.set_defaults(handler=cmd_index)
 
@@ -108,18 +111,38 @@ def cmd_index(args) -> int:
 
     stats = build_index(cfg, embedder, store, reindex=args.reindex, progress=say)
     say(None)
-    store.close()
 
     if stats.errors and not args.quiet:
         for line in stats.errors[:10]:
             print(f"warn: {line}", file=sys.stderr)
-    print(
+    print(_summary(stats))
+
+    if args.watch:
+        _watch(cfg, embedder, store, args)
+    store.close()
+    return 0
+
+
+def _summary(stats) -> str:
+    return (
         f"indexed {stats.indexed} files ({stats.chunks} chunks), "
         f"{stats.unchanged} unchanged, {stats.removed} removed, "
         f"{stats.embedded} embedded, {stats.reused} from cache, "
         f"{stats.elapsed:.1f}s"
     )
-    return 0
+
+
+def _watch(cfg, embedder, store, args) -> None:
+    """Re-scan on a timer, keeping the model in memory — a pass over an unchanged tree is cheap."""
+    print(f"watching {cfg.root} every {args.interval:g}s — Ctrl-C to stop", file=sys.stderr)
+    try:
+        while True:
+            time.sleep(max(args.interval, 0.2))
+            stats = build_index(cfg, embedder, store)
+            if stats.indexed or stats.removed:
+                print(_summary(stats))
+    except KeyboardInterrupt:
+        print("stopped", file=sys.stderr)
 
 
 def cmd_find(args) -> int:

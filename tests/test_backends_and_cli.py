@@ -66,3 +66,23 @@ def test_cli_reports_no_results(repo, capsys):
     capsys.readouterr()
     assert cli.main(["-C", str(root), "find", "zzz", "--lang", "erlang"]) == 1
     assert "nothing found" in capsys.readouterr().out
+
+
+def test_watch_loop_picks_up_changes_and_stops(repo, monkeypatch, capsys):
+    root = repo(FILES)
+    calls = {"n": 0}
+
+    def fake_sleep(_seconds):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            (root / "extra.py").write_text("def gamma():\n    return 3\n", encoding="utf-8")
+            return
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(cli.time, "sleep", fake_sleep)
+    assert cli.main(["-C", str(root), "--provider", "hash", "index", "--watch"]) == 0
+
+    output = capsys.readouterr().out
+    assert output.count("indexed") >= 2
+    assert cli.main(["-C", str(root), "find", "gamma", "-f", "files"]) == 0
+    assert "extra.py" in capsys.readouterr().out
