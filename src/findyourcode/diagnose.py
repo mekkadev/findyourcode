@@ -119,6 +119,15 @@ def _readable(store: Store) -> Check:
     return Check("vectors", True, f"readable through {store.vector_backend}")
 
 
+def _graph(store: Store, stats: dict) -> Check:
+    """An index from before the graph existed reads as empty rather than absent."""
+    if store.get_meta("graph") == "rebuild":
+        return Check("graph", False, "index predates the call graph — run `fyc index` to fill it")
+    if not stats["calls"]:
+        return Check("graph", True, "no calls found — a corpus with no grammar behind it?")
+    return Check("graph", True, f"{stats['symbols']} symbols, {stats['calls']} call sites")
+
+
 def _index(cfg: Config) -> list[Check]:
     if not cfg.db_path.exists():
         return [Check("index", False, f"none at {cfg.root} — run `fyc index`")]
@@ -136,6 +145,7 @@ def _index(cfg: Config) -> list[Check]:
             ),
             Check("model", stats["signature"] != "-", stats["signature"]),
             _readable(store),
+            _graph(store, stats),
         ]
     finally:
         store.close()

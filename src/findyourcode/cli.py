@@ -265,6 +265,8 @@ def _traces(store, hits, embedder, args, cfg):
     """--trace follows the edge the query cares about, so the path needs the vector."""
     if getattr(args, "trace", None) is None or not hits:
         return None
+    if _output_format(args) in ("paths", "files"):
+        return None  # nowhere to print it
     if args.trace:
         cfg.trace_depth = max(1, args.trace)
     vector = embedder.embed_query(" ".join(args.query))

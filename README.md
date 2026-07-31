@@ -86,7 +86,7 @@ the same edges feed ranking: up to five chunks that neither retriever returned,
 but that a strong result calls or that call it, join the page *below* the best
 direct answer and never above it. on ordinary queries that leaves the ranking
 untouched — mrr 0.850 with the graph and without it. on questions whose answer
-lives one call away, ten results find what text alone needs thirteen to find.
+lives one call away, ten results find what text alone needs twelve to find.
 both claims are one command each, in [benchmarks](docs/BENCHMARKS.md).
 
 ## agents

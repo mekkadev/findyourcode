@@ -93,19 +93,20 @@ answer is a module one call away from the module the question describes.
 `shutil.py`.
 
 ```
-                       recall@10  recall@15     MRR
-  ---------------------------------------------------
-  no graph, n=10            0.41          -   0.238
-  no graph, n=15            0.41       0.53   0.248
-  graph, n=10               0.47          -   0.247
-  graph, n=10, weight 0.8   0.53          -   0.257
+                            results  found     MRR
+  --------------------------------------------------
+  no graph                       10   0.41   0.238
+  no graph                       12   0.47   0.243
+  no graph                       13   0.53   0.248
+  graph                          10   0.47   0.247
+  graph, graph_weight 0.8        10   0.53   0.257
 ```
 
-read the first and third rows together: the graph finds in ten results what text
-alone needs thirteen to find, and at `graph_weight = 0.8` what text needs fifteen
-to find. the default is 0.65 because 0.8 costs recall@3 on the ordinary set
-(0.89 → 0.86); if your questions look more like the multi-hop set than the
-ordinary one, it is one line of `.findyourcode.toml`.
+the graph finds in ten results what text alone needs twelve to find, and at
+`graph_weight = 0.8` what text needs thirteen to find. the default is 0.65
+because 0.8 costs recall@3 on the ordinary set (0.89 → 0.86); if your questions
+look more like the multi-hop set than the ordinary one, it is one line of
+`.findyourcode.toml`.
 
 seventeen cases is a small set and each case is worth 0.06, so treat the gap as
 a direction, not a measurement. how it was built, so you can judge it: a

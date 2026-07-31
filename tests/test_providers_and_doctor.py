@@ -218,3 +218,21 @@ def test_local_provider_prefixes_and_dimensions(monkeypatch):
     assert seen["documents"][-1] == "passage: body"
     assert seen["queries"][-1] == "query: question"
     assert plain.embed_documents([]).shape == (0, 384)
+
+
+def test_doctor_notices_an_index_from_before_the_call_graph(repo):
+    root = repo(
+        {"a.py": "def alpha():\n    return beta()\n", "b.py": "def beta():\n    return 1\n"}
+    )
+    cfg = load_config(root, provider="hash")
+    store = Store(cfg.db_path)
+    build_index(cfg, get_embedder(cfg.provider), store)
+
+    checks = {c.name: c for c in run(cfg)}
+    assert checks["graph"].ok and "call sites" in checks["graph"].detail
+
+    store.db.executescript("DROP TABLE defs; DROP TABLE refs;")
+    store.set_meta("graph", "rebuild")
+    store.commit()
+    store.close()
+    assert not {c.name: c for c in run(cfg)}["graph"].ok

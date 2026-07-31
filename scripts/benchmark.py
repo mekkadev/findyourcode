@@ -21,6 +21,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CASES = ROOT / "examples" / "eval_stdlib.json"
+MULTIHOP = ROOT / "examples" / "eval_multihop.json"
+RUSSIAN = ROOT / "examples" / "eval_stdlib_ru.json"
 
 
 def main() -> int:
@@ -60,6 +62,15 @@ def main() -> int:
     run(target, [*globals_, "eval", str(args.cases.resolve())])
     print()
     run(target, [*globals_, "eval", str(args.cases.resolve()), "--sweep"])
+    if args.cases == DEFAULT_CASES:
+        # The other two sets only mean anything against the stdlib they were written for.
+        for label, extra in (
+            ("multi-hop, text only", ["eval", str(MULTIHOP), "--no-graph"]),
+            ("multi-hop, with the call graph", ["eval", str(MULTIHOP)]),
+            ("the same questions in russian", ["eval", str(RUSSIAN)]),
+        ):
+            print(f"\n-- {label}")
+            run(target, [*globals_, *extra])
 
     db = target / ".findyourcode" / "index.db"
     print(f"\nindex on disk   {db.stat().st_size / 1e6:.0f} mb")
