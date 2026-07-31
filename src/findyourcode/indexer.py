@@ -90,8 +90,10 @@ def build_index(
     flush_at = max(cfg.batch_size * 4, 128)
 
     with ThreadPoolExecutor(max_workers=max(1, cfg.workers)) as pool:
-        for start in range(0, len(todo), 512):
-            batch = todo[start : start + 512]
+        # Every file in a submitted batch is held in memory as text plus chunks, so the
+        # batch size is the real memory bound, not the flush threshold.
+        for start in range(0, len(todo), 96):
+            batch = todo[start : start + 96]
             for unit in pool.map(lambda item: _prepare(item, cfg, stats), batch):
                 if unit is None:
                     continue

@@ -1,4 +1,5 @@
 import json
+import shutil
 
 from findyourcode import cli
 from findyourcode import store as store_module
@@ -78,13 +79,19 @@ def test_watch_loop_picks_up_changes_and_stops(repo, monkeypatch, capsys):
         if calls["n"] == 1:
             (root / "extra.py").write_text("def gamma():\n    return 3\n", encoding="utf-8")
             return
+        if calls["n"] == 2:
+            # someone removes the index while watch is running: the open handle would
+            # keep writing to a dead inode and report success forever
+            shutil.rmtree(root / ".findyourcode")
+            return
         raise KeyboardInterrupt
 
     monkeypatch.setattr(cli.time, "sleep", fake_sleep)
     assert cli.main(["-C", str(root), "--provider", "hash", "index", "--watch"]) == 0
 
-    output = capsys.readouterr().out
-    assert output.count("indexed") >= 2
+    captured = capsys.readouterr()
+    assert captured.out.count("indexed") >= 2
+    assert "index disappeared" in captured.err
     assert cli.main(["-C", str(root), "find", "gamma", "-f", "files"]) == 0
     assert "extra.py" in capsys.readouterr().out
 

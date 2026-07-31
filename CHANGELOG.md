@@ -34,6 +34,16 @@ notable changes, newest first. semver.
 
 ### fixed
 
+- a filter cost a full brute-force scan of everything it matched: `--lang python`
+  on the stdlib index took 0.36s against 0.06s unfiltered. the vector index is
+  asked first now and the scan only runs when the approximate answer cannot fill
+  the page — same results, 6x faster.
+- opening an index ran `CREATE TABLE IF NOT EXISTS` and an auto_vacuum pragma, so
+  every `fyc find` took a write lock beside a running `--watch`.
+- a single minified line printed in full: one 400 kb line filled the terminal.
+- `fyc index --watch` reported successful passes forever after its index was
+  deleted underneath it, writing to an unlinked file.
+- indexing held up to 512 files in memory at once regardless of their size.
 - a file that produced no chunks — an empty file, a file of only whitespace — was
   never recorded, so every later run counted it as new and `fyc doctor` could
   never report the index as fresh.

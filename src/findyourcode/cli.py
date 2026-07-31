@@ -154,7 +154,7 @@ def cmd_index(args) -> int:
     print(_summary(stats))
 
     if args.watch:
-        _watch(cfg, embedder, store, args)
+        store = _watch(cfg, embedder, store, args)
     store.close()
     return 0
 
@@ -168,17 +168,23 @@ def _summary(stats) -> str:
     )
 
 
-def _watch(cfg, embedder, store, args) -> None:
+def _watch(cfg, embedder, store: Store, args) -> Store:
     """Re-scan on a timer, keeping the model in memory — a pass over an unchanged tree is cheap."""
     print(f"watching {cfg.root} every {args.interval:g}s — Ctrl-C to stop", file=sys.stderr)
     try:
         while True:
             time.sleep(max(args.interval, 0.2))
+            if not cfg.db_path.exists():
+                # someone removed .findyourcode; the open handle writes to a dead inode
+                print("index disappeared — rebuilding", file=sys.stderr)
+                store.close()
+                store = Store(cfg.db_path)
             stats = build_index(cfg, embedder, store)
             if stats.indexed or stats.removed:
                 print(_summary(stats))
     except KeyboardInterrupt:
         print("stopped", file=sys.stderr)
+    return store
 
 
 def cmd_find(args) -> int:

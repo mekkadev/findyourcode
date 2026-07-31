@@ -107,13 +107,22 @@ class Store:
                 f"{self.path} is not a readable index ({exc}).\n"
                 f"Delete it with `fyc clear` and index again."
             ) from exc
-        self.db.execute("PRAGMA auto_vacuum=INCREMENTAL")
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("PRAGMA synchronous=NORMAL")
         self.db.execute("PRAGMA foreign_keys=ON")
-        self.db.executescript(_SCHEMA)
+        if not self._has_schema():
+            # Creating tables takes a write lock; a search on an existing index must not.
+            self.db.execute("PRAGMA auto_vacuum=INCREMENTAL")
+            self.db.executescript(_SCHEMA)
         self._vec_ok = _load_sqlite_vec(self.db)
         self._matrix: tuple[np.ndarray, np.ndarray] | None = None
+        self._closed = False
+
+    def _has_schema(self) -> bool:
+        row = self.db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'chunks'"
+        ).fetchone()
+        return row is not None
 
     # ---- metadata -----------------------------------------------------
 
@@ -301,6 +310,9 @@ class Store:
         self.db.commit()
 
     def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
         self.db.commit()
         self.db.close()
 
@@ -337,8 +349,14 @@ class Store:
         if allowed is not None and not allowed:
             return []
 
-        # A filter that selects a small slice is answered exactly: an approximate
-        # global top-N may not contain a single row that passes it.
+        if self._vec_ok and allowed is not None:
+            # Ask the index first — it is an order of magnitude cheaper. Only when the
+            # approximate answer cannot fill the page does the filtered slice get scanned.
+            hits = self._ann(blob, min(max(k * 8, 200), VEC_MAX_K), allowed)
+            if len(hits) >= k or len(allowed) > EXACT_SCAN_LIMIT:
+                return hits[:k]
+            return self._exact_top_k(query, k, sorted(allowed))
+
         if allowed is not None and len(allowed) <= EXACT_SCAN_LIMIT:
             return self._exact_top_k(query, k, sorted(allowed))
 
@@ -368,6 +386,19 @@ class Store:
         top = np.argpartition(-scores, min(k, len(scores) - 1))[:k]
         top = top[np.argsort(-scores[top])]
         return [(int(ids[i]), float(scores[i])) for i in top if np.isfinite(scores[i])]
+
+    def _ann(self, blob: bytes, fetch: int, allowed: set[int] | None) -> list[tuple[int, float]]:
+        rows = self.db.execute(
+            "SELECT rowid AS id, distance FROM vec_chunks "
+            "WHERE embedding MATCH ? AND k = ? ORDER BY distance",
+            (blob, fetch),
+        ).fetchall()
+        # A zero-length vector has no cosine: sqlite-vec returns NULL, and those rows
+        # sort first. Drop them rather than scoring them ahead of real matches.
+        hits = [(r["id"], 1.0 - float(r["distance"])) for r in rows if r["distance"] is not None]
+        if allowed is not None:
+            hits = [hit for hit in hits if hit[0] in allowed]
+        return hits
 
     def _exact_top_k(self, query: np.ndarray, k: int, ids: list[int]) -> list[tuple[int, float]]:
         vector = np.asarray(query, dtype=np.float32)

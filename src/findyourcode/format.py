@@ -8,6 +8,8 @@ import sys
 
 from .search import Hit
 
+MAX_LINE_CHARS = 200
+
 _C = {
     "path": "\033[1;36m",
     "meta": "\033[2m",
@@ -57,7 +59,10 @@ def render(
         width = len(str(row.start_line + len(shown)))
         for offset, line in enumerate(shown):
             number = str(row.start_line + offset).rjust(width)
-            out.append(f"    {c['line']}{number}{c['reset']} {line.rstrip()}")
+            text = line.rstrip()
+            if len(text) > MAX_LINE_CHARS:  # one minified line is not worth a screenful
+                text = text[:MAX_LINE_CHARS] + f" … +{len(text) - MAX_LINE_CHARS} chars"
+            out.append(f"    {c['line']}{number}{c['reset']} {text}")
         if len(body) > len(shown):
             out.append(f"    {c['meta']}... {len(body) - len(shown)} more lines{c['reset']}")
         out.append("")

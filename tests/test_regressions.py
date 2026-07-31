@@ -292,3 +292,32 @@ def test_a_file_that_yields_no_chunks_is_still_recorded(repo):
     store.close()
 
     assert {c.name: c for c in diagnose(cfg)}["freshness"].ok
+
+
+def test_a_minified_line_does_not_flood_the_terminal():
+    from findyourcode.format import MAX_LINE_CHARS, render
+    from findyourcode.search import Hit
+    from findyourcode.store import Row
+
+    huge = "const data = " + ", ".join(str(i) for i in range(20_000)) + ";"
+    row = Row(1, "big.js", "javascript", "const", "data", "", 1, 1, huge)
+
+    out = render([Hit(row=row, score=1.0)], snippet_lines=3, color=False)
+    assert len(out) < MAX_LINE_CHARS + 200
+    assert "chars" in out
+
+
+def test_opening_an_existing_index_does_not_write_to_it(repo):
+    root = repo({"a.py": "def alpha():\n    return 1\n"})
+    cfg = load_config(root, provider="hash")
+    store = Store(cfg.db_path)
+    build_index(cfg, get_embedder(cfg.provider), store)
+    store.close()
+
+    before = cfg.db_path.stat().st_mtime_ns
+    reader = Store(cfg.db_path)
+    try:
+        assert reader._has_schema()
+        assert cfg.db_path.stat().st_mtime_ns == before, "a search must not take a write lock"
+    finally:
+        reader.close()
