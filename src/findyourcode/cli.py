@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import shutil
 import sys
-from pathlib import Path
 
 from . import __version__
 from .config import load_config

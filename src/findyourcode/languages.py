@@ -199,6 +199,11 @@ def is_definition(lang: str, node_type: str) -> bool:
     table = _DEFINITIONS.get(lang)
     if table is not None:
         return node_type in table
+    return looks_like_definition(node_type)
+
+
+def looks_like_definition(node_type: str) -> bool:
+    """Grammar-agnostic guess, used for languages without a curated node list."""
     return bool(_GENERIC_DEFINITION.search(node_type))
 
 
@@ -232,7 +237,7 @@ def node_name(node, source: bytes) -> str | None:
             if child.type in ("variable_declarator", "type_spec"):
                 return node_name(child, source) or _text(child, source).split("=")[0].strip()
             return _text(child, source)
-        if child.type in CONTAINER_NODES or is_definition("", child.type):
+        if child.type in CONTAINER_NODES or looks_like_definition(child.type):
             found = node_name(child, source)
             if found:
                 return found
