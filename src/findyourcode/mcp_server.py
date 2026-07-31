@@ -15,8 +15,8 @@ from typing import Any, TextIO
 
 from .config import Config, load_config
 from .embeddings import Embedder, get_embedder
-from .format import symbol_of
-from .search import search, similar_to
+from .format import as_trace, symbol_of
+from .search import build_trace, search, similar_to
 from .store import Filters, Store
 
 PROTOCOL_VERSION = "2025-06-18"
@@ -58,6 +58,13 @@ TOOLS = [
                     "type": "string",
                     "enum": ["hybrid", "semantic", "lexical"],
                     "description": "hybrid (default) blends vectors and bm25",
+                },
+                "trace": {
+                    "type": "boolean",
+                    "description": (
+                        "also return the call path around each hit — what reaches it and "
+                        "what it reaches. Use it to follow a flow instead of reading files."
+                    ),
                 },
                 **_FILTERS,
             },
@@ -216,7 +223,18 @@ class Server:
         )
         if not hits:
             return _text(f"nothing in the index matches {query!r}")
-        return _text(_render(hits), data={"query": query, "results": [_as_dict(h) for h in hits]})
+
+        traces = {}
+        if arguments.get("trace"):
+            vector = embedder.embed_query(query)
+            traces = {
+                hit.row.id: build_trace(store, hit.row, self.cfg, vector if vector.any() else None)
+                for hit in hits
+            }
+        return _text(
+            _render(hits, traces),
+            data={"query": query, "results": [_as_dict(h, traces) for h in hits]},
+        )
 
     def _similar(self, arguments: dict) -> dict:
         location = (arguments.get("location") or "").strip()
@@ -310,14 +328,32 @@ def _limit(arguments: dict) -> int:
         return 10
 
 
-def _render(hits) -> str:
+def _render(hits, traces: dict | None = None) -> str:
     blocks = []
     for hit in hits:
         row = hit.row
         label = " ".join(p for p in (row.kind, symbol_of(row)) if p)
         where = f"{row.rel}:{row.start_line}-{row.end_line}"
-        blocks.append(f"{where}  {label}  [{hit.score:.3f}]\n{_snippet(row)}")
+        head = f"{where}  {label}  [{hit.score:.3f}]"
+        if hit.via and hit.semantic_rank is None and hit.lexical_rank is None:
+            head += f"  (reached through the call graph — {hit.via})"
+        node = (traces or {}).get(row.id)
+        if node is not None:
+            head += "".join("\n" + line for line in _trace_lines(node))
+        blocks.append(f"{head}\n{_snippet(row)}")
     return "\n\n".join(blocks)
+
+
+def _trace_lines(node, depth: int = 0) -> list[str]:
+    out = []
+    for child in node.children:
+        arrow = "↑" if child.direction == "called by" else "→"
+        pad = "  " * (depth + 1)
+        out.append(
+            f"{pad}{arrow} {child.row.rel}:{child.row.start_line}  {symbol_of(child.row)}".rstrip()
+        )
+        out.extend(_trace_lines(child, depth + 1))
+    return out
 
 
 def _snippet(row) -> str:
@@ -332,8 +368,14 @@ def _snippet(row) -> str:
     return text
 
 
-def _as_dict(hit) -> dict:
-    return {**_row_dict(hit.row), "score": round(hit.score, 6)}
+def _as_dict(hit, traces: dict | None = None) -> dict:
+    entry = {**_row_dict(hit.row), "score": round(hit.score, 6)}
+    if hit.via:
+        entry["via"] = hit.via
+    node = (traces or {}).get(hit.row.id)
+    if node is not None:
+        entry["trace"] = as_trace(node)["calls"]
+    return entry
 
 
 def _row_dict(row) -> dict:

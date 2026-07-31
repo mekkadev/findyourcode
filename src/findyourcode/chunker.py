@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from .config import Config
+from .graph import attach_names, definitions_from_tree, references_from_text, references_from_tree
 from .languages import (
     CONTAINER_NODES,
     TEXTUAL_LANGS,
@@ -80,20 +81,24 @@ class Chunk:
     doc: str = ""
     file_doc: str = ""
     sha: str = ""
+    defs: list[str] = field(default_factory=list)
+    refs: list[tuple[str, str]] = field(default_factory=list)
 
 
 def chunk_source(rel: str, lang: str, text: str, cfg: Config) -> list[Chunk]:
     parser = None if lang in TEXTUAL_LANGS else get_parser(lang)
+    source = text.encode("utf-8")
     lines = text.split("\n")
     chunks = None
+    tree = None
 
     if parser is not None:
         try:
-            tree = parser.parse(text.encode("utf-8"))
+            tree = parser.parse(source)
         except Exception:
             tree = None
         if tree is not None:
-            builder = _AstChunker(rel, lang, lines, text.encode("utf-8"), cfg)
+            builder = _AstChunker(rel, lang, lines, source, cfg)
             builder.walk(tree.root_node, [])
             builder.collect_gaps()
             if builder.chunks:
@@ -105,6 +110,13 @@ def chunk_source(rel: str, lang: str, text: str, cfg: Config) -> list[Chunk]:
     file_doc = _file_summary(lines)
     for chunk in chunks:
         chunk.file_doc = file_doc
+
+    if tree is not None:
+        refs = references_from_tree(tree.root_node, source)
+        defs = definitions_from_tree(tree.root_node, source, lang)
+    else:
+        refs, defs = references_from_text(text, 1), []
+    attach_names(chunks, refs, defs)
     return chunks
 
 
@@ -320,8 +332,8 @@ def _classify(node_type: str) -> str:
 
 
 def _body_of(node):
-    for field in ("body", "declaration_list"):
-        found = node.child_by_field_name(field)
+    for named in ("body", "declaration_list"):
+        found = node.child_by_field_name(named)
         if found is not None:
             return found
     for child in node.named_children:

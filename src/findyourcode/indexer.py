@@ -68,12 +68,18 @@ def build_index(
     seen: set[str] = set()
     todo: list[tuple[SourceFile, str]] = []
 
+    # An index built before the call graph existed has to be re-read once. Nothing is
+    # re-embedded: the chunk texts are unchanged, so every vector comes from the cache.
+    stale_graph = store.get_meta("graph") == "rebuild"
+    if stale_graph:
+        say("index predates the call graph — rebuilding it from the cached vectors")
+
     for source in files:
         sha = _file_sha(source.path)
         if sha is None:
             continue
         seen.add(source.rel)
-        if not reindex and known.get(source.rel) == sha:
+        if not reindex and not stale_graph and known.get(source.rel) == sha:
             stats.unchanged += 1
             continue
         todo.append((source, sha))
@@ -110,6 +116,7 @@ def build_index(
         store.remove_files(stats.unreadable)
         stats.removed += len(stats.unreadable)
     store.prune_cache()
+    store.set_meta("graph", "ready")
     store.set_meta("indexed_at", time.time())
     store.commit()
 
@@ -187,8 +194,10 @@ def _flush(store: Store, embedder: Embedder, buffer: list[_Unit], stats: IndexSt
     stats.reused += len(wanted) - len(missing)
 
     if missing:
+        # No copy into emb_cache: the vector is about to be written to the index itself,
+        # and that is where `cached_vectors` looks first. Only vectors that leave the
+        # index — archived by --reindex — need a second home.
         vectors = embedder.embed_documents([wanted[sha] for sha in missing])
-        store.cache_vectors(sig, missing, vectors)
         cache.update({sha: vectors[i] for i, sha in enumerate(missing)})
         stats.embedded += len(missing)
 

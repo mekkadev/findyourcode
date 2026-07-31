@@ -10,12 +10,18 @@ from pathlib import Path
 import numpy as np
 
 from .chunker import Chunk
+from .graph import definition_names
 
-SCHEMA_VERSION = "1"
+SCHEMA_VERSION = "2"
 
 # sqlite-vec refuses a knn query above this k; beyond it we answer exactly instead.
 VEC_MAX_K = 4096
 EXACT_SCAN_LIMIT = 20_000
+
+# One name resolving to more definitions than this is `run` or `handle`: no edge is
+# better than a dozen wrong ones. And no single expansion may return the whole repo.
+MAX_DEF_FANOUT = 8
+MAX_EDGES = 2000
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
@@ -57,6 +63,25 @@ CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts
     USING fts5(text, tokenize='unicode61 remove_diacritics 2');
 """
 
+# The call graph, kept as two name lists rather than resolved edges: resolution then
+# happens at query time and can never go stale behind an incremental re-index.
+_GRAPH_SCHEMA = """
+CREATE TABLE IF NOT EXISTS defs (
+    chunk_id INTEGER NOT NULL REFERENCES chunks(id) ON DELETE CASCADE,
+    name TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS defs_name ON defs(name);
+CREATE INDEX IF NOT EXISTS defs_chunk ON defs(chunk_id);
+
+CREATE TABLE IF NOT EXISTS refs (
+    chunk_id INTEGER NOT NULL REFERENCES chunks(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    scope TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS refs_name ON refs(name);
+CREATE INDEX IF NOT EXISTS refs_chunk ON refs(chunk_id);
+"""
+
 
 @dataclass
 class Filters:
@@ -79,6 +104,16 @@ class Filters:
 
     def active(self) -> bool:
         return bool(self.langs or self.paths or self.kinds)
+
+
+@dataclass
+class Edge:
+    """One resolved call: `src` references the name `name`, which `dst` defines."""
+
+    src: int
+    dst: int
+    name: str
+    weight: float = 1.0
 
 
 @dataclass
@@ -107,12 +142,16 @@ class Store:
                 f"{self.path} is not a readable index ({exc}).\n"
                 f"Delete it with `fyc clear` and index again."
             ) from exc
+        fresh = not self._has_schema()
+        if fresh:
+            # auto_vacuum only takes on an empty database, and only before WAL is
+            # switched on — the other order leaves it at 0 and every deleted page stays.
+            self.db.execute("PRAGMA auto_vacuum=INCREMENTAL")
         self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("PRAGMA synchronous=NORMAL")
         self.db.execute("PRAGMA foreign_keys=ON")
-        if not self._has_schema():
+        if fresh:
             # Creating tables takes a write lock; a search on an existing index must not.
-            self.db.execute("PRAGMA auto_vacuum=INCREMENTAL")
             self.db.executescript(_SCHEMA)
         self._vec_ok = _load_sqlite_vec(self.db)
         self._matrix: tuple[np.ndarray, np.ndarray] | None = None
@@ -147,6 +186,7 @@ class Store:
             )
         self.set_meta("signature", signature)
         self.set_meta("dim", dim)
+        self._ensure_graph()
         self.set_meta("schema", SCHEMA_VERSION)
         backend = "vec0" if self._vec_ok else "numpy"
         stored = self.get_meta("backend")
@@ -170,6 +210,32 @@ class Store:
                 "(chunk_id INTEGER PRIMARY KEY, vec BLOB NOT NULL)"
             )
         self.db.commit()
+
+    def _ensure_graph(self) -> None:
+        """An index built before the graph existed has chunks but no edges: the tables
+        appear empty rather than absent, so say so and let the indexer refill them.
+
+        The graph is derived data, so a table that no longer matches is dropped rather
+        than migrated — refilling it re-reads the files but re-embeds nothing."""
+        for table, columns in (
+            ("defs", {"chunk_id", "name"}),
+            ("refs", {"chunk_id", "name", "scope"}),
+        ):
+            if self._has_table(table) and self._columns(table) != columns:
+                self.db.execute(f"DROP TABLE {table}")
+        existed = self._has_table("refs")
+        self.db.executescript(_GRAPH_SCHEMA)
+        if not existed and self.db.execute("SELECT 1 FROM chunks LIMIT 1").fetchone():
+            self.set_meta("graph", "rebuild")
+
+    def _columns(self, table: str) -> set[str]:
+        return {r[1] for r in self.db.execute(f"PRAGMA table_info({table})")}
+
+    def _has_table(self, name: str) -> bool:
+        row = self.db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (name,)
+        ).fetchone()
+        return row is not None
 
     @property
     def vector_backend(self) -> str:
@@ -222,6 +288,7 @@ class Store:
                 ),
             )
             chunk_id = cur.lastrowid
+            self._add_graph(chunk_id, chunk)
             blob = np.asarray(vector, dtype=np.float32).tobytes()
             if self._vec_ok:
                 self.db.execute(
@@ -233,6 +300,18 @@ class Store:
                 )
             self.db.execute("INSERT INTO chunks_fts(rowid, text) VALUES (?, ?)", (chunk_id, text))
         self._matrix = None
+
+    def _add_graph(self, chunk_id: int | None, chunk: Chunk) -> None:
+        names = definition_names(chunk)
+        if names:
+            self.db.executemany(
+                "INSERT INTO defs(chunk_id, name) VALUES (?, ?)", [(chunk_id, n) for n in names]
+            )
+        if chunk.refs:
+            self.db.executemany(
+                "INSERT INTO refs(chunk_id, name, scope) VALUES (?, ?, ?)",
+                [(chunk_id, name, scope) for name, scope in chunk.refs],
+            )
 
     def cached_vectors(self, sig: str, shas: list[str], dim: int) -> dict[str, np.ndarray]:
         """Vectors already computed for this text: live index first, archive second."""
@@ -302,6 +381,9 @@ class Store:
         self.db.execute("DROP TABLE IF EXISTS vec_chunks")
         self.db.execute("DROP TABLE IF EXISTS vectors")
         self.db.execute("DELETE FROM chunks_fts")
+        for table in ("defs", "refs"):
+            if self._has_table(table):
+                self.db.execute(f"DELETE FROM {table}")
         self.db.execute("DELETE FROM chunks")
         self.db.execute("DELETE FROM files")
         self._matrix = None
@@ -445,6 +527,109 @@ class Store:
             for r in self.db.execute(sql, ids)
         }
 
+    # ---- the call graph -----------------------------------------------
+
+    def edges_from(self, ids: list[int]) -> list[Edge]:
+        """Chunks that define what these chunks call."""
+        if not ids or not self._has_table("refs"):
+            return []
+        marks = ",".join("?" * len(ids))
+        return self._resolve(
+            self._pairs(f"r.chunk_id IN ({marks})", [*ids, MAX_EDGES]),
+        )
+
+    def edges_to(self, ids: list[int]) -> list[Edge]:
+        """Chunks that call what these chunks define."""
+        if not ids or not self._has_table("refs"):
+            return []
+        marks = ",".join("?" * len(ids))
+        names = [
+            r["name"]
+            for r in self.db.execute(f"SELECT name FROM defs WHERE chunk_id IN ({marks})", ids)
+        ]
+        if not names:
+            return []
+        holes = ",".join("?" * len(names))
+        wanted = set(ids)
+        pairs = self._pairs(f"r.name IN ({holes})", [*names, MAX_EDGES])
+        return [edge for edge in self._resolve(pairs) if edge.dst in wanted]
+
+    def _pairs(self, where: str, params: list) -> list[tuple]:
+        return [
+            (r["id"], r["rel"], r["lang"], r["name"], r["scope"])
+            for r in self.db.execute(
+                "SELECT r.chunk_id AS id, c.rel AS rel, c.lang AS lang, r.name AS name, "
+                "r.scope AS scope FROM refs r "
+                f"JOIN chunks c ON c.id = r.chunk_id WHERE {where} LIMIT ?",
+                params,
+            )
+        ]
+
+    def _resolve(self, pairs: list[tuple]) -> list[Edge]:
+        """One rule, used in both directions. `linecache.getline()` names the module it
+        means, so a qualifier that matches a candidate's file or class settles it; failing
+        that a definition in the caller's own file wins; failing that every remaining
+        candidate is kept at weight 1/candidates. Only ever within one language — two
+        languages sharing a method name is a coincidence, not a call."""
+        definitions = self._definitions({pair[3] for pair in pairs})
+        edges: list[Edge] = []
+        for src, src_rel, src_lang, name, scope in pairs:
+            candidates = [
+                found
+                for found in definitions.get(name, ())
+                if found[0] != src and found[2] == src_lang
+            ]
+            if not candidates:
+                continue
+            qualified = [c for c in candidates if scope and _matches_scope(c, scope)]
+            local = [c for c in candidates if c[1] == src_rel]
+            chosen = qualified or local or candidates
+            weight = 1.0 if (qualified or local) else 1.0 / len(candidates)
+            edges.extend(Edge(src, found[0], name, weight) for found in chosen)
+        return edges
+
+    def _definitions(self, names: set[str]) -> dict[str, list[tuple[int, str, str, str]]]:
+        found: dict[str, list[tuple[int, str, str, str]]] = {}
+        listed = sorted(names)
+        for start in range(0, len(listed), 400):
+            batch = listed[start : start + 400]
+            marks = ",".join("?" * len(batch))
+            keep = [
+                r["name"]
+                for r in self.db.execute(
+                    f"SELECT name, COUNT(*) n FROM defs WHERE name IN ({marks}) "
+                    "GROUP BY name HAVING n <= ?",
+                    [*batch, MAX_DEF_FANOUT],
+                )
+            ]
+            if not keep:
+                continue
+            holes = ",".join("?" * len(keep))
+            for row in self.db.execute(
+                "SELECT d.name AS name, d.chunk_id AS id, c.rel AS rel, c.lang AS lang, "
+                f"c.parent AS parent FROM defs d JOIN chunks c ON c.id = d.chunk_id "
+                f"WHERE d.name IN ({holes})",
+                keep,
+            ):
+                found.setdefault(row["name"], []).append(
+                    (row["id"], row["rel"], row["lang"], row["parent"] or "")
+                )
+        return found
+
+    def restrict(self, ids: list[int], filters: Filters) -> set[int]:
+        """Which of these chunks survive the active filters — a neighbour reached through
+        the graph has to obey `--lang` and `--path` like any other result."""
+        if not ids or not filters.active():
+            return set(ids)
+        where, params = filters.sql()
+        marks = ",".join("?" * len(ids))
+        return {
+            r[0]
+            for r in self.db.execute(
+                f"SELECT id FROM chunks WHERE id IN ({marks}) AND {where}", [*ids, *params]
+            )
+        }
+
     def rows(self, ids: list[int]) -> dict[int, Row]:
         if not ids:
             return {}
@@ -484,9 +669,14 @@ class Store:
         langs = self.db.execute(
             "SELECT lang, COUNT(*) n FROM chunks GROUP BY lang ORDER BY n DESC LIMIT 12"
         ).fetchall()
+        graph = (0, 0)
+        if self._has_table("refs"):
+            graph = (one("SELECT COUNT(*) FROM defs"), one("SELECT COUNT(*) FROM refs"))
         return {
             "files": one("SELECT COUNT(*) FROM files"),
             "chunks": one("SELECT COUNT(*) FROM chunks"),
+            "symbols": graph[0],
+            "calls": graph[1],
             "signature": self.get_meta("signature") or "-",
             "backend": self.get_meta("backend") or "-",
             "db_bytes": self.path.stat().st_size if self.path.exists() else 0,
@@ -509,6 +699,13 @@ class Store:
             matrix = np.vstack(vectors) if vectors else np.zeros((0, max(dim, 1)), dtype=np.float32)
             self._matrix = (np.asarray(ids, dtype=np.int64), matrix)
         return self._matrix
+
+
+def _matches_scope(definition: tuple[int, str, str, str], scope: str) -> bool:
+    """`shutil.get_terminal_size` points at shutil.py; `Mailer.deliver` at class Mailer."""
+    _, rel, _, parent = definition
+    stem = rel.rsplit("/", 1)[-1].split(".", 1)[0]
+    return scope in (stem, parent) or parent.endswith(f".{scope}")
 
 
 def _to_row(r: sqlite3.Row) -> Row:

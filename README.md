@@ -1,11 +1,14 @@
 <img src="https://raw.githubusercontent.com/mekkadev/findyourcode/main/docs/header.svg" alt="findyourcode — search a codebase by what the code does, not the words in it" width="640">
 
-<img src="https://raw.githubusercontent.com/mekkadev/findyourcode/main/docs/demo.gif" alt="fyc index, two searches by meaning, and fyc doctor, on a five-file repository" width="880">
+<img src="https://raw.githubusercontent.com/mekkadev/findyourcode/main/docs/demo.gif" alt="fyc index, a search by meaning, a call path printed with --trace, and fyc doctor" width="880">
 
-the first query is `reject a request without a valid ticket`. `reject` appears
-nowhere in that repository, and the two answers it returns are in different
-languages. grep cannot do this. an llm reading the whole repository can, but not
-in 40ms and not for free.
+the first query is `reject a request without a valid ticket`. the word `reject`
+appears nowhere in that repository. grep cannot do this; an llm reading the whole
+repository can, but not in 40ms and not for free.
+
+the second query answers with a path instead of a list — the middleware, what it
+calls to verify the ticket, and what that calls in turn. that part is not
+embeddings at all.
 
 ## install
 
@@ -24,6 +27,7 @@ fyc index                          # once per repo, incremental after that
 fyc index --watch                  # keep it fresh while you work
 
 fyc find "why do payments retry"
+fyc find "where do we check the auth header" --trace
 fyc find "rate limit" --lang python --path src/api
 fyc find "worker entrypoint" -f paths | fzf
 fyc similar src/auth/session.py:42 # where else does this pattern live
@@ -43,13 +47,55 @@ like py311/queue.py:97-109 method Queue.empty
 
 other commands: `status`, `clear`, `providers`, `eval`, `mcp`. flags worth
 knowing: `-n` results, `-L` snippet lines, `--kind function`,
-`--mode semantic|lexical`, `--explain`, `--json`.
+`--mode semantic|lexical`, `--explain`, `--json`, `--no-graph`.
+
+## the call graph
+
+embeddings answer *what looks like this*. they cannot answer *what is one call
+away*, and the thing you asked about is often not the thing that implements it.
+while tree-sitter has the file open, every call site and every definition is
+recorded — no second parse, 2.7mb on a 15k-chunk index — and retrieval gets a
+structural signal next to the two textual ones.
+
+`--trace` prints the path rather than the page:
+
+```console
+$ fyc find "where do we check the auth header" -n 1 --trace -L 3
+
+ 1. web/middleware.ts:8-20  function guard  [1.000]
+    → web/tickets.ts:8  verifyTicket
+      → web/crypto.ts:3  hmacSha256
+      → web/tickets.ts:20  rolesFor
+    → web/middleware.ts:31  HttpError
+     8 export async function guard(ctx: Context, next: () => Promise<void>) {
+     9   const header = ctx.headers["authorization"] ?? "";
+    10   const ticket = header.startsWith("Bearer ") ? header.slice(7) : "";
+    ... 10 more lines
+```
+
+`↑` marks the callers, `→` the callees, and which branch gets followed is decided
+by the query rather than by the source order.
+
+names are resolved conservatively, because a wrong edge is worse than a missing
+one. only within one language. `linecache.getline` resolves to `linecache.py`
+because the qualifier says which of the four `getline` definitions is meant. a
+name defined in the caller's own file beats one from elsewhere. a name defined in
+more than eight places — `run`, `handle`, `get` — is dropped rather than guessed.
+
+the same edges feed ranking: up to five chunks that neither retriever returned,
+but that a strong result calls or that call it, join the page *below* the best
+direct answer and never above it. on ordinary queries that leaves the ranking
+untouched — mrr 0.850 with the graph and without it. on questions whose answer
+lives one call away, ten results find what text alone needs thirteen to find.
+both claims are one command each, in [benchmarks](docs/BENCHMARKS.md).
 
 ## agents
 
 `fyc mcp` serves the index over mcp on stdio: `search_code`, `find_similar`,
-`index_status`. this is a retriever to put *next to* an agent's grep, not a
-replacement for it — claude code ships no index on purpose, and cursor's own
+`index_status`. `search_code` takes `trace: true`, which is worth more to an agent
+than to a human — it answers "how does the request get here" in one call instead
+of four file reads. this is a retriever to put *next to* an agent's grep, not a
+replacement for it: claude code ships no index on purpose, and cursor's own
 numbers say grep and semantic together beat either alone.
 
 ```bash
@@ -91,88 +137,43 @@ class CredentialChecker:
 that `names:` line is why a query never phrased like the code still lands on it.
 
 retrieval is two searches over one sqlite file — vectors through `sqlite-vec`, bm25
-through `fts5` — blended 0.75 to the vector side. that number was measured, not
-guessed. candidates that only bm25 returned get an exact cosine before ranking,
-otherwise one incidental keyword match outranks the right answer.
+through `fts5` — blended 0.75 to the vector side, then the graph adds what neither
+of them could reach. candidates that only bm25 returned get an exact cosine before
+ranking, otherwise one incidental keyword match outranks the right answer.
 
 the index is incremental twice over: files by sha256, chunks by the hash of the text
 that goes to the model. editing one function re-embeds one function.
 
 ## numbers
 
-cpython stdlib — 671 files, 15k chunks, one cpu, default model:
+cpython 3.11 stdlib — 672 files, 15k chunks, one cpu, default model:
 
 ```
-first index      329s
-re-index         0.5s    nothing changed
-search           40ms    over 15k chunks
+first index      305s
+re-index         2.4s    nothing changed
+search            42ms   over 15k chunks
 cold start       2.6s    python starting and the model loading
-on disk          72mb
+on disk           71mb   of which the call graph is 2.7mb
 ```
 
-`fyc eval` scores retrieval against a file of query/expected-file pairs, and
-`--sweep` compares settings on it:
+36 queries against the whole stdlib — 26 by meaning, 10 by exact identifier:
+recall@1 0.81, recall@10 0.92, mrr 0.850. split them and the reason for two
+retrievers shows. on the identifier half the vectors collapse to recall@1 0.50
+where bm25 gets 0.90; on the meaning half bm25 is the one that falls behind. a
+benchmark of one shape only would have argued convincingly for deleting the
+branch that saves the other half.
 
-```console
-$ fyc eval examples/eval_stdlib.json --sweep
+ask in russian and the same 26 questions still land on english code: recall@10
+0.81 against 0.88 for english, where bm25 alone gets 0.27.
 
-  setting           recall@1  recall@3  recall@10     MRR
-  -------------------------------------------------------
-  blend a=0             0.67      0.83       0.92   0.760
-  blend a=0.25          0.69      0.86       0.92   0.789
-  blend a=0.5           0.75      0.89       0.92   0.826
-  blend a=0.75          0.83      0.92       0.92   0.870   <- default
-  blend a=1             0.69      0.83       0.89   0.756
-  semantic              0.69      0.83       0.89   0.756
-  lexical               0.67      0.83       0.92   0.760
-  rrf                   0.81      0.86       0.94   0.851
-```
-
-36 queries against the whole stdlib: 26 by meaning, 10 by exact identifier. split
-them and the reason for two retrievers shows. on the meaning half, semantic alone
-matches the blend — mrr 0.808 against 0.821. on the identifier half it collapses to
-recall@1 0.50 while the blend gets all ten. a benchmark of one shape only would
-have argued convincingly for deleting the branch that saves the other half.
-
-36 hand-written queries against one corpus is a smoke test with a method attached,
-not a benchmark — read it as evidence that the decisions were measured, not as a
-quality claim.
-
-recall@1 is 0.83, so roughly one query in six puts the right file below the top. the
-ceiling is the default model's 128-token window — it reads the name, the docstring
-and the file summary, not the body. swap in `intfloat/multilingual-e5-large` or
-`voyage-code-3` and run the same eval on your own repo rather than trusting either
-number.
-
-don't take the table on faith — it is one command, and it works on your code too:
+the settings that lost are printed next to the settings that won —
+[docs/BENCHMARKS.md](docs/BENCHMARKS.md) has the fusion sweep, the multi-hop set,
+the multilingual control, and the cross-encoder rerank that was measured and
+rejected. don't take any of it on faith; it is one command on your own code:
 
 ```bash
 python scripts/benchmark.py                            # this python's stdlib
 python scripts/benchmark.py --corpus ~/work/monorepo --cases my_cases.json
-```
-
-## rerank, measured and rejected
-
-a cross-encoder reads the query and the chunk together, so it should beat a vector
-computed without ever seeing the query. on this corpus it did not:
-
-```
-                                  recall@1  recall@3  recall@10     MRR
-  no rerank                           0.83      0.92       0.92   0.870
-  ms-marco-MiniLM-L-6-v2              0.78      0.86       0.92   0.828
-  jina-reranker-v1-turbo-en           0.69      0.83       0.92   0.775
-  jina-reranker-v2-base-multilingual  0.78      0.86       0.97   0.824
-```
-
-all three are trained on prose retrieval and code is out of distribution for them.
-the multilingual one earns something in exactly one place — it lifts correct files
-out of the tail of the shortlist into the top ten, 0.92 to 0.97 — and pays for it
-in precision at one and 2.5 seconds a query. so it ships off by default, with the
-numbers next to the flag:
-
-```bash
-fyc find "..." --rerank
-fyc eval my_cases.json --rerank      # settle it on your corpus, not mine
 ```
 
 ## models
@@ -189,9 +190,6 @@ fyc index --provider voyage
 the index remembers which model built it and refuses to mix vector spaces, so
 changing models means `fyc index --reindex` rather than silently wrong results.
 
-the default model is multilingual: ask in any of ~50 languages and it still finds
-english code, which is the point when the codebase is english and you are not.
-
 ## config
 
 `.findyourcode.toml` in the project root, overridden by `FYC_<FIELD>` or a flag.
@@ -202,6 +200,8 @@ provider = "local"
 max_chunk_lines = 110      # larger chunks, coarser addressing
 alpha = 0.75               # weight of the semantic branch
 per_file = 2               # so one file cannot own the page
+graph_weight = 0.65        # how loudly a call edge argues for a chunk
+graph_limit = 5            # how many the graph may add to a page
 exclude = ["**/generated/**", "*.pb.go"]
 ```
 
@@ -217,7 +217,7 @@ unknown extensions still get indexed through the line-window fallback.
 ## development
 
 ```bash
-pytest                     # 109 tests on the hash provider — offline, deterministic
+pytest                     # 129 tests on the hash provider — offline, deterministic
 FYC_TEST_REAL_MODEL=1 pytest tests/test_real_model.py   # the real model, ~220mb
 cd examples/demo_repo && fyc index && fyc find "checking the password on sign in"
 ```
@@ -225,10 +225,11 @@ cd examples/demo_repo && fyc index && fyc find "checking the password on sign in
 `scripts/benchmark.py` reproduces the numbers above and `scripts/record_demo.py`
 re-records the gif at the top from live output.
 
-`walker` picks files, `chunker` cuts them, `enrich` writes what gets embedded,
-`store` is sqlite, `search` is the two retrievers and the blend, `evaluate` is
-recall and mrr, `diagnose` is `doctor`, `mcp_server` is the agent surface, `cli`
-is yours. see `contributing.md`.
+`walker` picks files, `chunker` cuts them, `graph` reads the calls out of the same
+parse, `enrich` writes what gets embedded, `store` is sqlite, `search` is the two
+retrievers, the blend and the propagation, `evaluate` is recall and mrr,
+`diagnose` is `doctor`, `mcp_server` is the agent surface, `cli` is yours. see
+`contributing.md`.
 
 ## prior art
 
@@ -249,15 +250,21 @@ worth knowing, and what they do better:
 - [ripgrep](https://github.com/BurntSushi/ripgrep) — wins outright on every query
   where you know the string. that is most queries. this tool is for the rest.
 
-what is actually different here: the enrichment step is explicit and documented
-rather than incidental, the blend weight and the per-file cap were chosen by
-measurement with the losing configurations published, bm25-only candidates get an
-exact cosine before ranking, and the whole thing is one sqlite file with no server,
-no daemon, no vector database and no api key.
+what is actually different here is that retrieval is not only embeddings. the call
+graph tree-sitter hands over for free is used twice — once to rank what similarity
+cannot reach, once to answer with a path instead of a page. the direction is not
+mine: cursor puts a symbol layer in front of its embeddings and aider ranks with
+pagerank over tree-sitter and no embeddings at all. what is mine is carrying both
+in one sqlite file you can pip install next to your repository.
+
+beyond that: the enrichment step is explicit and documented rather than
+incidental, every weight was chosen by measurement with the losing configurations
+published, bm25-only candidates get an exact cosine before ranking, and there is
+no server, no daemon, no vector database and no api key.
 
 ## next
 
-- cross-encoder rerank over the top of the blend
+- edges from imports and type references, not only calls
 - query expansion for one-word queries
 - publish to pypi
 

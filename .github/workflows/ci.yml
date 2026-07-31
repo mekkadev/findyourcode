@@ -61,6 +61,7 @@ jobs:
         run: |
           python -m findyourcode --provider hash index -q
           python -m findyourcode find "checking the password on sign in" -n 3
+          python -m findyourcode find "reject a request without a ticket" --trace -n 2 -L 0
           python -m findyourcode similar api/session.py:16 -n 2 -f paths
           python -m findyourcode status
           python -m findyourcode doctor || true

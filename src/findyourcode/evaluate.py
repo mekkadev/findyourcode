@@ -79,6 +79,7 @@ def evaluate(
     mode: str = "hybrid",
     fusion: str = "",
     reranker=None,
+    graph: bool | None = None,
 ) -> Report:
     report = Report()
     for case in cases:
@@ -91,6 +92,7 @@ def evaluate(
             mode=mode,
             fusion=fusion,
             reranker=reranker,
+            graph=graph,
         )
         rank = None
         for position, hit in enumerate(hits, 1):

@@ -1,18 +1,21 @@
-"""Hybrid retrieval: dense vectors + BM25, fused into one ranking.
+"""Hybrid retrieval: dense vectors + BM25 + the call graph, fused into one ranking.
 
 Two fusion strategies: normalized score blending (default — keeps semantics
-dominant and yields a readable 0..1 score) and reciprocal rank fusion.
+dominant and yields a readable 0..1 score) and reciprocal rank fusion. On top of
+either, structure: a chunk one call away from a strong match is pulled in even
+when neither retriever saw it, which is how a query reaches the implementation
+it never names.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 
 from .config import Config
 from .embeddings import Embedder
-from .store import Filters, Row, Store
+from .store import Edge, Filters, Row, Store
 
 
 @dataclass
@@ -23,6 +26,19 @@ class Hit:
     lexical: float | None = None
     semantic_rank: int | None = None
     lexical_rank: int | None = None
+    graph: float | None = None
+    via: str = ""
+
+
+@dataclass
+class TraceNode:
+    """One step of a call path: how we got here, and what this place calls in turn."""
+
+    row: Row
+    via: str = ""
+    direction: str = ""
+    relevance: float = 0.0
+    children: list[TraceNode] = field(default_factory=list)
 
 
 def search(
@@ -36,6 +52,7 @@ def search(
     fusion: str = "",
     per_file: int | None = None,
     reranker=None,
+    graph: bool | None = None,
 ) -> list[Hit]:
     filters = filters or Filters()
     depth = max(limit * cfg.oversample, 50)
@@ -76,6 +93,11 @@ def search(
     else:
         _score_blend(hits, cfg, lexical_used=bool(sparse), semantic_used=bool(dense))
 
+    if cfg.graph if graph is None else graph:
+        reached = _propagate(store, hits, cfg, filters, query_vector)
+        if query_vector is not None and reached:
+            _fill_missing_semantics(store, hits, query_vector)
+
     ranked = sorted(hits.values(), key=lambda h: -h.score)
     cap = cfg.per_file if per_file is None else per_file
     shortlist = _dedupe(ranked, cap)
@@ -111,6 +133,129 @@ def similar_to(
         if cid in rows and cid != anchor.id and (same_file or rows[cid].rel != anchor.rel)
     ]
     return anchor, _dedupe(hits, cfg.per_file)[:limit]
+
+
+def build_trace(
+    store: Store,
+    row: Row,
+    cfg: Config,
+    query_vector=None,
+) -> TraceNode:
+    """The call path through a result: who reaches it, and what it reaches in turn.
+
+    Which callee to follow is decided by the query, not by the source order — the
+    branch that answers the question is the one worth printing."""
+    root = TraceNode(row=row, relevance=1.0)
+    visited = {row.id}
+
+    up = _step(store, [row.id], "up", query_vector, cfg.trace_callers, visited)
+    down = _step(store, [row.id], "down", query_vector, cfg.trace_fanout, visited)
+    for node in down:
+        node.children = _descend(store, node.row, cfg, query_vector, cfg.trace_depth - 1, visited)
+    root.children = up + down
+    return root
+
+
+def _descend(store, row: Row, cfg: Config, query_vector, depth: int, visited: set[int]):
+    if depth <= 0:
+        return []
+    nodes = _step(store, [row.id], "down", query_vector, cfg.trace_fanout, visited)
+    for node in nodes:
+        node.children = _descend(store, node.row, cfg, query_vector, depth - 1, visited)
+    return nodes
+
+
+def _step(
+    store: Store,
+    ids: list[int],
+    direction: str,
+    query_vector,
+    fanout: int,
+    visited: set[int],
+) -> list[TraceNode]:
+    if fanout <= 0:
+        return []
+    edges = store.edges_from(ids) if direction == "down" else store.edges_to(ids)
+    reachable: dict[int, Edge] = {}
+    for edge in edges:
+        target = edge.dst if direction == "down" else edge.src
+        if target not in visited:
+            reachable.setdefault(target, edge)
+    if not reachable:
+        return []
+
+    rows = store.rows(list(reachable))
+    label = "calls" if direction == "down" else "called by"
+    nodes = []
+    for cid, relevance in _by_relevance(store, list(rows), query_vector, reachable):
+        visited.add(cid)
+        nodes.append(
+            TraceNode(row=rows[cid], via=reachable[cid].name, direction=label, relevance=relevance)
+        )
+        if len(nodes) >= fanout:
+            break
+    return nodes
+
+
+def _by_relevance(store: Store, ids: list[int], query_vector, edges) -> list[tuple[int, float]]:
+    if query_vector is None:
+        return sorted(((cid, edges[cid].weight) for cid in ids), key=lambda pair: -pair[1])
+    vectors = store.vectors_for(ids)
+    scored = [(cid, float(np.dot(vectors[cid], query_vector))) for cid in ids if cid in vectors]
+    return sorted(scored, key=lambda pair: -pair[1])
+
+
+def _propagate(
+    store: Store, hits: dict[int, Hit], cfg: Config, filters: Filters, query_vector=None
+) -> set[int]:
+    """Spread the score of the strongest results along call edges.
+
+    The graph adds candidates; it never re-ranks the ones the text already found.
+    Letting a call edge push a text match up the page cost 0.016 MRR on the stdlib
+    set for nothing, so a neighbour only ever enters below the best direct answer:
+    structure is a reason to read something, not a reason to trust it more than the
+    query itself."""
+    seeds = sorted(hits.values(), key=lambda h: -h.score)[: cfg.graph_seeds]
+    seeds = [hit for hit in seeds if hit.score > 0]
+    if not seeds:
+        return set()
+
+    seed_ids = [hit.row.id for hit in seeds]
+    ceiling = seeds[0].score * cfg.graph_ceiling
+    boosts: dict[int, tuple[float, str]] = {}
+
+    def collect(target: int, source: Hit, weight: float, label: str) -> None:
+        amount = cfg.graph_weight * source.score * weight
+        total, first = boosts.get(target, (0.0, label))
+        boosts[target] = (total + amount, first)
+
+    for edge in store.edges_from(seed_ids):
+        source = hits.get(edge.src)
+        if source is not None and edge.dst != edge.src:
+            collect(edge.dst, source, edge.weight, f"called by {_name_of(source.row)}")
+    for edge in store.edges_to(seed_ids):
+        source = hits.get(edge.dst)
+        if source is not None and edge.src != edge.dst:
+            collect(edge.src, source, edge.weight, f"calls {edge.name}")
+
+    candidates = {cid: value for cid, value in boosts.items() if cid not in hits}
+    fresh = sorted(candidates.items(), key=lambda pair: -pair[1][0])[: cfg.graph_limit]
+    if not fresh:
+        return set()
+
+    allowed = store.restrict(sorted(cid for cid, _ in fresh), filters)
+    rows = store.rows(sorted(allowed))
+    for cid, (amount, label) in fresh:
+        row = rows.get(cid)
+        if row is None:
+            continue
+        strength = min(amount, cfg.graph_weight)
+        hits[cid] = Hit(row=row, score=min(strength, ceiling), graph=strength, via=label)
+    return set(rows)
+
+
+def _name_of(row: Row) -> str:
+    return row.symbol or row.parent or row.rel.rsplit("/", 1)[-1]
 
 
 def _fill_missing_semantics(store: Store, hits: dict[int, Hit], query_vector) -> None:

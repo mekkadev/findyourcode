@@ -26,7 +26,7 @@ OUT = ROOT / "docs"
 SCRIPT = [
     ("fyc index", 1.0),
     ('fyc find "reject a request without a valid ticket" -n 2 -L 4', 3.0),
-    ('fyc find "how do we take money from a card" -n 3 -f paths', 2.2),
+    ('fyc find "where do we check the auth header" -n 1 --trace -L 3', 3.2),
     ("fyc doctor", 2.4),
 ]
 

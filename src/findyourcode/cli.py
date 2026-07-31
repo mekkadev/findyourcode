@@ -17,7 +17,7 @@ from .evaluate import evaluate, load_cases, render_report, render_sweep
 from .format import as_json, as_paths, render, symbol_of, use_color
 from .indexer import build_index
 from .rerank import DEFAULT_MODEL as RERANK_DEFAULT
-from .search import search, similar_to
+from .search import build_trace, search, similar_to
 from .store import Filters, Store
 
 
@@ -72,6 +72,20 @@ def _build_parser() -> argparse.ArgumentParser:
     find.add_argument("--fusion", choices=["blend", "rrf"], help="how the two rankings are merged")
     find.add_argument("--explain", action="store_true", help="show per-retriever ranks")
     find.add_argument(
+        "--trace",
+        nargs="?",
+        type=int,
+        const=0,
+        help="print the call path around each hit (optionally how many hops)",
+    )
+    find.add_argument(
+        "--no-graph",
+        dest="graph",
+        action="store_false",
+        default=None,
+        help="rank on text alone, without call-graph propagation",
+    )
+    find.add_argument(
         "--rerank",
         nargs="?",
         const=RERANK_DEFAULT,
@@ -96,6 +110,13 @@ def _build_parser() -> argparse.ArgumentParser:
     ev.add_argument("--fusion", choices=["blend", "rrf"], help="how the two rankings are merged")
     ev.add_argument("--alpha", type=float, help="weight of the semantic branch (blend fusion)")
     ev.add_argument("--sweep", action="store_true", help="compare several alpha values and modes")
+    ev.add_argument(
+        "--no-graph",
+        dest="graph",
+        action="store_false",
+        default=None,
+        help="score on text alone, without call-graph propagation",
+    )
     ev.add_argument(
         "--rerank", nargs="?", const=RERANK_DEFAULT, help="rescore with a cross-encoder"
     )
@@ -233,9 +254,23 @@ def cmd_find(args) -> int:
         fusion=args.fusion or "",
         per_file=args.per_file,
         reranker=_reranker(args, cfg),
+        graph=args.graph,
     )
+    traces = _traces(store, hits, embedder, args, cfg)
     store.close()
-    return _emit(hits, args, explain=args.explain)
+    return _emit(hits, args, explain=args.explain, traces=traces)
+
+
+def _traces(store, hits, embedder, args, cfg):
+    """--trace follows the edge the query cares about, so the path needs the vector."""
+    if getattr(args, "trace", None) is None or not hits:
+        return None
+    if args.trace:
+        cfg.trace_depth = max(1, args.trace)
+    vector = embedder.embed_query(" ".join(args.query))
+    if not vector.any():
+        vector = None
+    return {hit.row.id: build_trace(store, hit.row, cfg, vector) for hit in hits}
 
 
 def cmd_similar(args) -> int:
@@ -285,6 +320,7 @@ def cmd_eval(args) -> int:
 
     if args.sweep:
         rows = []
+        configured = cfg.alpha
         for alpha in (0.0, 0.25, 0.5, 0.75, 1.0):
             cfg.alpha = alpha
             rows.append(
@@ -293,6 +329,7 @@ def cmd_eval(args) -> int:
                     evaluate(store, embedder, cfg, cases, args.limit, fusion="blend"),
                 )
             )
+        cfg.alpha = configured  # the rows below are not alpha sweeps; restore the real one
         for mode in ("semantic", "lexical"):
             rows.append(
                 (
@@ -301,6 +338,12 @@ def cmd_eval(args) -> int:
                 )
             )
         rows.append(("rrf", evaluate(store, embedder, cfg, cases, args.limit, fusion="rrf")))
+        rows.append(
+            (
+                "no graph",
+                evaluate(store, embedder, cfg, cases, args.limit, fusion="blend", graph=False),
+            )
+        )
         print(render_sweep(rows, args.limit))
         store.close()
         return 0
@@ -314,6 +357,7 @@ def cmd_eval(args) -> int:
         mode=args.mode,
         fusion=args.fusion or "",
         reranker=_reranker(args, cfg),
+        graph=args.graph,
     )
     store.close()
     print(render_report(report, f"{provider}:{model}", args.limit))
@@ -344,6 +388,8 @@ def cmd_status(args) -> int:
     print(f"vectors   {stats['backend']}")
     print(f"files     {stats['files']}")
     print(f"chunks    {stats['chunks']}")
+    if stats["calls"]:
+        print(f"graph     {stats['symbols']} symbols, {stats['calls']} call sites")
     if stats["langs"]:
         top = ", ".join(f"{lang} {n}" for lang, n in stats["langs"])
         print(f"languages {top}")
@@ -420,16 +466,24 @@ def _output_format(args) -> str:
     return "json" if args.json else args.format
 
 
-def _emit(hits, args, explain: bool = False) -> int:
+def _emit(hits, args, explain: bool = False, traces=None) -> int:
     style = _output_format(args)
     if style == "json":
-        print(as_json(hits))
+        print(as_json(hits, traces))
     elif style in ("paths", "files"):
         text = as_paths(hits, with_line=style == "paths")
         if text:
             print(text)
     else:
-        print(render(hits, snippet_lines=args.lines, explain=explain, color=use_color()))
+        print(
+            render(
+                hits,
+                snippet_lines=args.lines,
+                explain=explain,
+                color=use_color(),
+                traces=traces,
+            )
+        )
     return 0 if hits else 1
 
 

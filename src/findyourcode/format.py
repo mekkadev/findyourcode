@@ -6,9 +6,10 @@ import json
 import os
 import sys
 
-from .search import Hit
+from .search import Hit, TraceNode
 
 MAX_LINE_CHARS = 200
+_ARROWS = {"called by": "↑", "calls": "→"}
 
 _C = {
     "path": "\033[1;36m",
@@ -28,7 +29,11 @@ def use_color(stream=sys.stdout) -> bool:
 
 
 def render(
-    hits: list[Hit], snippet_lines: int = 8, explain: bool = False, color: bool = True
+    hits: list[Hit],
+    snippet_lines: int = 8,
+    explain: bool = False,
+    color: bool = True,
+    traces: dict[int, TraceNode] | None = None,
 ) -> str:
     c = _colors(color)
     if not hits:
@@ -52,7 +57,16 @@ def render(
                 parts.append(f"semantic {rank}({hit.semantic:.3f})")
             if hit.lexical is not None:
                 parts.append(f"lexical #{hit.lexical_rank} (bm25 {hit.lexical:.2f})")
+            if hit.graph is not None:
+                parts.append(f"graph +{hit.graph:.3f} ({hit.via})")
             out.append(f"    {c['meta']}{' | '.join(parts) or 'no sub-scores'}{c['reset']}")
+        elif hit.via and hit.semantic_rank is None and hit.lexical_rank is None:
+            # nothing matched this text; say why it is on the page at all
+            out.append(f"    {c['meta']}via the call graph — {hit.via}{c['reset']}")
+
+        node = (traces or {}).get(row.id)
+        if node is not None:
+            out.extend(_trace_lines(node, c))
 
         body = row.code.split("\n")
         shown = body if snippet_lines <= 0 else body[:snippet_lines]
@@ -69,6 +83,32 @@ def render(
     return "\n".join(out).rstrip()
 
 
+def _trace_lines(node: TraceNode, c: dict, depth: int = 0) -> list[str]:
+    out = []
+    for child in node.children:
+        arrow = _ARROWS.get(child.direction, "·")
+        where = f"{child.row.rel}:{child.row.start_line}"
+        label = symbol_of(child.row) or child.via
+        out.append(
+            f"    {'  ' * depth}{c['meta']}{arrow} {where}{c['reset']}"
+            f"  {c['meta']}{label}{c['reset']}"
+        )
+        out.extend(_trace_lines(child, c, depth + 1))
+    return out
+
+
+def as_trace(node: TraceNode) -> dict:
+    return {
+        "path": node.row.rel,
+        "start_line": node.row.start_line,
+        "end_line": node.row.end_line,
+        "symbol": symbol_of(node.row),
+        "edge": node.direction,
+        "via": node.via,
+        "calls": [as_trace(child) for child in node.children],
+    }
+
+
 def as_paths(hits: list[Hit], with_line: bool = True) -> str:
     """One location per line — meant for `| xargs`, `$EDITOR` and fzf."""
     seen: list[str] = []
@@ -79,9 +119,10 @@ def as_paths(hits: list[Hit], with_line: bool = True) -> str:
     return "\n".join(seen)
 
 
-def as_json(hits: list[Hit]) -> str:
-    payload = [
-        {
+def as_json(hits: list[Hit], traces: dict[int, TraceNode] | None = None) -> str:
+    payload = []
+    for h in hits:
+        entry = {
             "path": h.row.rel,
             "start_line": h.row.start_line,
             "end_line": h.row.end_line,
@@ -91,10 +132,14 @@ def as_json(hits: list[Hit]) -> str:
             "score": round(h.score, 6),
             "semantic": None if h.semantic is None else round(h.semantic, 6),
             "lexical": None if h.lexical is None else round(h.lexical, 6),
+            "graph": None if h.graph is None else round(h.graph, 6),
+            "via": h.via,
             "code": h.row.code,
         }
-        for h in hits
-    ]
+        node = (traces or {}).get(h.row.id)
+        if node is not None:
+            entry["trace"] = as_trace(node)["calls"]
+        payload.append(entry)
     return json.dumps(payload, ensure_ascii=False, indent=2)
 
 

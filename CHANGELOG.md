@@ -2,6 +2,39 @@
 
 notable changes, newest first. semver.
 
+## [0.4.0] - 2026-07-31
+
+### added
+
+- a call graph, extracted while tree-sitter already holds the parse, so it costs
+  nothing at index time and 2.7mb on 15k chunks. every call site and every
+  definition is stored as a name rather than a resolved edge, so resolution
+  happens at query time and can never go stale behind an incremental re-index.
+- `fyc find --trace` — the call path around each hit instead of a list of hits:
+  what reaches it, and what it reaches, following the branch the query is about.
+- ranking now uses those edges. up to five chunks that neither retriever
+  returned, but that a strong result calls or that call it, join the page below
+  the best direct answer — never above it. on ordinary queries the ranking is
+  unchanged (mrr 0.850 either way); on a set of 17 multi-hop questions ten
+  results find what text alone needs thirteen to find.
+- `search_code` takes `trace: true` over mcp, so an agent can follow a flow
+  instead of reading four files to reconstruct it.
+- `examples/eval_multihop.json` and `examples/eval_stdlib_ru.json`, and
+  `docs/BENCHMARKS.md` with the method and the losing configurations.
+- `fyc eval --no-graph` and a `no graph` row in `--sweep`, so the claim above is
+  one command.
+- `fyc status` reports the size of the graph.
+
+### fixed
+
+- a fresh index was 47% larger than its contents: `PRAGMA auto_vacuum` was issued
+  after `journal_mode=WAL`, which silently discards it, so nothing was ever
+  reclaimed. every vector was also copied into the archive table it was about to
+  make redundant. the stdlib index is 70.6mb where it was 103mb.
+- `fyc eval --sweep` left alpha at 1.0 for the rows printed after the alpha
+  sweep, which mattered as soon as one of them was not a pure semantic or
+  lexical run.
+
 ## [0.3.0] - 2026-07-31
 
 ### added

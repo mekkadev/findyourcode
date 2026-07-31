@@ -8,7 +8,7 @@ pip install -e ".[all]"
 pytest
 ```
 
-67 tests, all on the `hash` provider: deterministic, offline, no model download.
+129 tests, all on the `hash` provider: deterministic, offline, no model download.
 keep it that way — a test that needs the network or the 220mb default model does
 not belong in the suite. ci runs the same on python 3.10, 3.11 and 3.12, plus a
 smoke test over `examples/demo_repo`, which is also how to see it work for real:
@@ -19,18 +19,20 @@ cd examples/demo_repo && fyc index && fyc find "checking the password on sign in
 
 ## where things live
 
-`walker` picks files, `chunker` cuts them, `enrich` writes what gets embedded,
-`store` is sqlite, `search` is the two retrievers and the blend, `evaluate` is
-recall and mrr, `cli` is the surface. a change usually belongs in one of them.
+`walker` picks files, `chunker` cuts them, `graph` reads the calls out of the
+same parse, `enrich` writes what gets embedded, `store` is sqlite, `search` is
+the two retrievers, the blend and the graph propagation, `evaluate` is recall and
+mrr, `cli` is the surface. a change usually belongs in one of them.
 
 ## changes that touch ranking
 
-anything in `search`, `enrich` or `chunker` moves the numbers, so measure it
-instead of arguing about it:
+anything in `search`, `enrich`, `graph` or `chunker` moves the numbers, so
+measure it instead of arguing about it:
 
 ```bash
 fyc eval ../eval_demo.json          # from inside examples/demo_repo
-fyc eval examples/eval_stdlib.json --sweep   # against an indexed cpython stdlib
+fyc eval examples/eval_stdlib.json --sweep     # against an indexed cpython stdlib
+fyc eval examples/eval_multihop.json --no-graph # what the call graph is worth
 ```
 
 put recall@1, recall@3, recall@10 and mrr before and after in the pull request.

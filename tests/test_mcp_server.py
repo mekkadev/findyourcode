@@ -213,3 +213,31 @@ def test_bad_arguments_are_reported(repo):
     assert all(r["result"]["isError"] for r in replies)
     assert "mode must be" in replies[0]["result"]["content"][0]["text"]
     assert "lang must be" in replies[1]["result"]["content"][0]["text"]
+
+
+def test_search_returns_the_call_path_when_asked(repo):
+    root = repo(
+        {
+            "web/routes.py": (
+                "def handle_login(request):\n"
+                '    """Entry point behind the login form."""\n'
+                "    return issue_ticket(request)\n"
+            ),
+            "auth/session.py": "def issue_ticket(request):\n    return request\n",
+        }
+    )
+    cfg = load_config(root, provider="hash")
+    store = Store(cfg.db_path)
+    build_index(cfg, get_embedder(cfg.provider), store)
+    store.close()
+
+    plain = drive(root, call("search_code", query="entry point behind the login form", limit=1))
+    traced = drive(
+        root, call("search_code", query="entry point behind the login form", limit=1, trace=True)
+    )
+
+    assert "→ auth/session.py" not in plain[0]["result"]["content"][0]["text"]
+    text = traced[0]["result"]["content"][0]["text"]
+    assert "→ auth/session.py:1  issue_ticket" in text
+    first = traced[0]["result"]["structuredContent"]["results"][0]
+    assert first["trace"][0]["path"] == "auth/session.py"

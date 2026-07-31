@@ -321,3 +321,17 @@ def test_opening_an_existing_index_does_not_write_to_it(repo):
         assert cfg.db_path.stat().st_mtime_ns == before, "a search must not take a write lock"
     finally:
         reader.close()
+
+
+def test_a_fresh_index_reclaims_the_pages_it_frees(repo):
+    """auto_vacuum is silently ignored when WAL is switched on first, and the index
+    kept every page it ever touched: 103 mb of stdlib where 71 mb was the content."""
+    root = repo({f"mod{i}.py": f"def alpha{i}():\n    return {i}\n" for i in range(20)})
+    cfg = load_config(root, provider="hash")
+    store = Store(cfg.db_path)
+    build_index(cfg, get_embedder(cfg.provider), store)
+
+    assert store.db.execute("PRAGMA auto_vacuum").fetchone()[0] == 2
+    # nothing has left the index, so nothing needs a second copy of its vector
+    assert store.db.execute("SELECT COUNT(*) FROM emb_cache").fetchone()[0] == 0
+    store.close()

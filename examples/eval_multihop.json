@@ -1,0 +1,19 @@
+[
+  { "query": "how the help output decides how wide to wrap a line", "expect": ["shutil.py"], "note": "argparse -> shutil.get_terminal_size" },
+  { "query": "the source line printed under each frame of a traceback", "expect": ["linecache.py"], "note": "traceback -> linecache.getline" },
+  { "query": "shortening the values shown when an assertion fails", "expect": ["unittest/util.py"], "note": "unittest.case -> util.safe_repr" },
+  { "query": "feeding a mail message into the parser piece by piece", "expect": ["email/feedparser.py"], "note": "email.parser -> FeedParser" },
+  { "query": "where the debugger keeps its breakpoints", "expect": ["bdb.py"], "note": "pdb -> bdb.clear_break" },
+  { "query": "reading the headers that came back with an http response", "expect": ["email/parser.py"], "note": "http.client -> email.parser.Parser" },
+  { "query": "showing the difference between expected and actual output", "expect": ["difflib.py"], "note": "doctest -> difflib.unified_diff" },
+  { "query": "where a warning finds the line of code it is complaining about", "expect": ["linecache.py"], "note": "warnings -> linecache.getline" },
+  { "query": "handing work items to the worker threads of a pool", "expect": ["queue.py"], "note": "futures.thread -> queue.put" },
+  { "query": "splitting the host and the port out of an address before opening it", "expect": ["urllib/parse.py"], "note": "urllib.request -> parse._splitport" },
+  { "query": "scheduling a callback to run later on the event loop", "expect": ["asyncio/events.py"], "note": "asyncio.base_events -> events.TimerHandle" },
+  { "query": "waiting for output from a child process without blocking", "expect": ["selectors.py"], "note": "subprocess -> selectors.get_map" },
+  { "query": "matching test file names against a pattern during discovery", "expect": ["fnmatch.py"], "note": "unittest.loader -> fnmatch.fnmatch" },
+  { "query": "how a rotating log file is opened and written", "expect": ["logging/__init__.py"], "note": "logging.handlers -> logging._open" },
+  { "query": "opening a plain tcp connection before the handshake", "expect": ["socket.py"], "note": "ssl -> socket.create_connection" },
+  { "query": "finding a module's source file on disk during import", "expect": ["_bootstrap_external.py"], "note": "importlib._bootstrap -> _bootstrap_external" },
+  { "query": "reading a tar archive that is compressed", "expect": ["gzip.py"], "note": "tarfile -> gzip.GzipFile" }
+]

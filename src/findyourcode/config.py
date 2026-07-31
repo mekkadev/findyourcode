@@ -57,6 +57,16 @@ class Config:
     workers: int = 8
     oversample: int = 8
     per_file: int = 2
+
+    graph: bool = True
+    graph_weight: float = 0.65
+    graph_limit: int = 5
+    graph_seeds: int = 10
+    graph_ceiling: float = 0.95
+    trace_depth: int = 3
+    trace_fanout: int = 2
+    trace_callers: int = 2
+
     rerank: str = ""
     rerank_depth: int = 30
     fusion: str = "blend"
