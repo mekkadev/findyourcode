@@ -341,7 +341,7 @@ C#, C, C++, Lua, Bash, Elixir и остальные из `tree-sitter-language-p
 | `cli.py` / `format.py` | команды и вывод |
 
 ```bash
-pytest                    # 39 тестов, идут на провайдере hash — сеть не нужна
+pytest                    # 57 тестов, идут на провайдере hash — сеть не нужна
 cd examples/demo_repo && fyc index && fyc find "проверка пароля"
 ```
 
