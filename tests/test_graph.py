@@ -270,3 +270,27 @@ def test_eval_can_be_run_without_the_graph(repo, capsys, tmp_path):
 
     assert cli.main(["-C", str(root), "eval", str(cases), "--no-graph"]) == 0
     assert "recall@1 1.00" in capsys.readouterr().out
+
+
+def test_a_common_name_does_not_crowd_out_the_real_callers(repo, monkeypatch):
+    """A chunk defining both `get` and something rare must still find the rare one's
+    callers: `get` resolves nowhere, but it would eat the row budget first."""
+    from findyourcode import store as store_module
+
+    files = {f"noise/mod{i}.py": "def get(x):\n    return x\n" for i in range(12)}
+    files.update({f"noise/use{i}.py": "def use(x):\n    return get(x)\n" for i in range(6)})
+    files["svc/api.py"] = (
+        "class Api:\n"
+        "    def get(self, x):\n"
+        "        return x\n"
+        "\n"
+        "    def rotate_secret(self, x):\n"
+        "        return x\n"
+    )
+    files["svc/boot.py"] = "def start(api, x):\n    return api.rotate_secret(x)\n"
+    _cfg, _embedder, store = _index(repo(files))
+
+    monkeypatch.setattr(store_module, "MAX_EDGES", 3)
+    callers = {e.src for e in store.edges_to([_id(store, "svc/api.py")])}
+    assert _id(store, "svc/boot.py") in callers
+    store.close()

@@ -549,10 +549,17 @@ class Store:
         ]
         if not names:
             return []
-        holes = ",".join("?" * len(names))
+        # Drop the unresolvable names first. A seed that defines both `get` and something
+        # rare would otherwise spend the whole row budget on callers of `get` that are
+        # about to be thrown away, and the real caller would never be fetched at all.
+        definitions = self._definitions(set(names))
+        keep = sorted({name for name in names if name in definitions})
+        if not keep:
+            return []
+        holes = ",".join("?" * len(keep))
         wanted = set(ids)
-        pairs = self._pairs(f"r.name IN ({holes})", [*names, MAX_EDGES])
-        return [edge for edge in self._resolve(pairs) if edge.dst in wanted]
+        pairs = self._pairs(f"r.name IN ({holes})", [*keep, MAX_EDGES])
+        return [edge for edge in self._resolve(pairs, definitions) if edge.dst in wanted]
 
     def _pairs(self, where: str, params: list) -> list[tuple]:
         return [
@@ -565,13 +572,13 @@ class Store:
             )
         ]
 
-    def _resolve(self, pairs: list[tuple]) -> list[Edge]:
+    def _resolve(self, pairs: list[tuple], known: dict | None = None) -> list[Edge]:
         """One rule, used in both directions. `linecache.getline()` names the module it
         means, so a qualifier that matches a candidate's file or class settles it; failing
         that a definition in the caller's own file wins; failing that every remaining
         candidate is kept at weight 1/candidates. Only ever within one language — two
         languages sharing a method name is a coincidence, not a call."""
-        definitions = self._definitions({pair[3] for pair in pairs})
+        definitions = known or self._definitions({pair[3] for pair in pairs})
         edges: list[Edge] = []
         for src, src_rel, src_lang, name, scope in pairs:
             candidates = [

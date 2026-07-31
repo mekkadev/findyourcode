@@ -60,21 +60,20 @@ structural signal next to the two textual ones.
 `--trace` prints the path rather than the page:
 
 ```console
-$ fyc find "where do we check the auth header" -n 1 --trace -L 3
+$ fyc find "verify that a ticket has not expired" -n 1 --trace -L 3
 
- 1. web/middleware.ts:8-20  function guard  [1.000]
-    → web/tickets.ts:8  verifyTicket
-      → web/crypto.ts:3  hmacSha256
-      → web/tickets.ts:20  rolesFor
-    → web/middleware.ts:31  HttpError
-     8 export async function guard(ctx: Context, next: () => Promise<void>) {
-     9   const header = ctx.headers["authorization"] ?? "";
-    10   const ticket = header.startsWith("Bearer ") ? header.slice(7) : "";
-    ... 10 more lines
+ 1. web/tickets.ts:8-18  function verifyTicket  [0.834]
+    ↑ web/middleware.ts:8  guard
+    → web/crypto.ts:15  constantTimeEqual
+    → web/tickets.ts:20  rolesFor
+     8 export async function verifyTicket(ticket: string): Promise<Principal | null> {
+     9   const [login, expiry, mac] = ticket.split(".");
+    10   if (!login || Number(expiry) * 1000 < Date.now()) {
+    ... 8 more lines
 ```
 
-`↑` marks the callers, `→` the callees, and which branch gets followed is decided
-by the query rather than by the source order.
+`↑` is who reaches it, `→` is what it reaches, and which branch gets followed is
+decided by the query rather than by the source order.
 
 names are resolved conservatively, because a wrong edge is worse than a missing
 one. only within one language. `linecache.getline` resolves to `linecache.py`
@@ -217,7 +216,7 @@ unknown extensions still get indexed through the line-window fallback.
 ## development
 
 ```bash
-pytest                     # 129 tests on the hash provider — offline, deterministic
+pytest                     # 131 tests on the hash provider — offline, deterministic
 FYC_TEST_REAL_MODEL=1 pytest tests/test_real_model.py   # the real model, ~220mb
 cd examples/demo_repo && fyc index && fyc find "checking the password on sign in"
 ```
