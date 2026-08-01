@@ -1,0 +1,14 @@
+[
+  { "query": "where the bytes of a request actually go out on the wire", "expect": ["net/http/transport.go"], "note": "client.go -> transport.RoundTrip" },
+  { "query": "how the header lines of a request are parsed", "expect": ["net/textproto/reader.go"], "note": "http/request.go -> textproto.ReadMIMEHeader" },
+  { "query": "the compression that gzip actually performs", "expect": ["compress/flate/"], "note": "gzip.go -> flate.NewWriter" },
+  { "query": "how the pattern of a regular expression is turned into a program", "expect": ["regexp/syntax/"], "note": "regexp.go -> syntax.Parse" },
+  { "query": "where the name in a url is resolved to an address", "expect": ["net/lookup.go", "net/dnsclient.go"], "note": "dial.go -> lookupIPAddr" },
+  { "query": "checking that the certificate belongs to the host we dialled", "expect": ["crypto/x509/verify.go"], "note": "tls/handshake_client.go -> VerifyHostname" },
+  { "query": "reading the fields of one line of a csv file", "expect": ["bufio/bufio.go"], "note": "csv/reader.go -> bufio.ReadSlice" },
+  { "query": "where a timestamp learns which timezone it is in", "expect": ["time/zoneinfo.go"], "note": "time.go -> Location.lookup" },
+  { "query": "the state machine behind decoding a json document", "expect": ["encoding/json/scanner.go"], "note": "decode.go -> scanner step functions" },
+  { "query": "how a tar entry knows how long its data is", "expect": ["archive/tar/strconv.go", "archive/tar/common.go"], "note": "reader.go -> parseNumeric" },
+  { "query": "the block cipher underneath a tls connection", "expect": ["crypto/aes/"], "note": "tls/cipher_suites.go -> aes.NewCipher" },
+  { "query": "where the http server decides to keep the connection open", "expect": ["net/http/transfer.go"], "note": "server.go -> newTransferWriter / shouldClose" }
+]
