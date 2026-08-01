@@ -1,0 +1,16 @@
+[
+  { "query": "how the characters are decoded from the bytes a reader was handed", "expect": ["sun/nio/cs/StreamDecoder.java"], "note": "InputStreamReader -> StreamDecoder.forInputStreamReader" },
+  { "query": "compressing the bytes that are written to a gzip stream", "expect": ["java/util/zip/Deflater.java"], "note": "DeflaterOutputStream -> Deflater.setInput" },
+  { "query": "the running checksum kept while a gzip stream is written", "expect": ["java/util/zip/CRC32.java"], "note": "GZIPOutputStream -> new CRC32" },
+  { "query": "how the bytes of a zip entry are uncompressed as they are read", "expect": ["java/util/zip/Inflater.java"], "note": "ZipFile -> Inflater.setInput" },
+  { "query": "how threads waiting on a latch are released when the count reaches zero", "expect": ["java/util/concurrent/locks/AbstractQueuedSynchronizer.java"], "note": "CountDownLatch.Sync -> AbstractQueuedSynchronizer.acquireSharedInterruptibly" },
+  { "query": "what actually blocks a thread until another thread hands the lock over", "expect": ["java/util/concurrent/locks/LockSupport.java"], "note": "AbstractQueuedSynchronizer -> LockSupport.parkNanos" },
+  { "query": "where an http client keeps a connection so the next request can reuse it", "expect": ["jdk/internal/net/http/ConnectionPool.java"], "note": "HttpConnection -> ConnectionPool.returnToPool" },
+  { "query": "reading the status line and the headers off an http/1 response", "expect": ["jdk/internal/net/http/Http1HeaderParser.java"], "note": "Http1Response -> new Http1HeaderParser" },
+  { "query": "how opening a url decides what code will fetch it", "expect": ["java/net/URLStreamHandler.java"], "note": "URL -> URLStreamHandler.parseURL" },
+  { "query": "what a socket hands the connect request down to", "expect": ["java/net/SocketImpl.java"], "note": "Socket -> SocketImpl.createPlatformSocketImpl; the connect call itself has too many definitions to resolve" },
+  { "query": "turning a glob into the pattern the file system actually matches with", "expect": ["sun/nio/fs/Globs.java"], "note": "UnixFileSystem -> Globs.toUnixRegexPattern" },
+  { "query": "where the rules for a time zone id are looked up", "expect": ["java/time/zone/ZoneRulesProvider.java"], "note": "ZoneRegion -> ZoneRulesProvider.getRules" },
+  { "query": "the description of a class that is written ahead of a serialised object", "expect": ["java/io/ObjectStreamClass.java"], "note": "ObjectOutputStream -> ObjectStreamClass.getClassDataLayout" },
+  { "query": "the buffer class that actually holds the bytes when you allocate one on the heap", "expect": ["java/nio/HeapByteBuffer.java"], "note": "ByteBuffer -> new HeapByteBuffer" }
+]

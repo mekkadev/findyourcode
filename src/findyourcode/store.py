@@ -598,7 +598,12 @@ class Store:
             if not candidates:
                 continue
             qualified = [c for c in candidates if scope and _matches_scope(c, scope)]
-            local = [c for c in candidates if c[1] == src_rel]
+            # A qualifier that matches nothing still rules out the caller's own file:
+            # `inf.getBytesWritten()` is somebody else's method, whoever `inf` is, and
+            # java is written almost entirely in receivers a name cannot resolve. The
+            # proximity rule would otherwise answer the caller's own private helper,
+            # confidently and wrongly.
+            local = [] if scope and not qualified else [c for c in candidates if c[1] == src_rel]
             chosen = qualified or local or candidates
             weight = 1.0 if (qualified or local) else 1.0 / len(candidates)
             edges.extend(Edge(src, found[0], name, weight) for found in chosen)
@@ -732,10 +737,14 @@ class Store:
 
 
 def _matches_scope(definition: tuple[int, str, str, str], scope: str) -> bool:
-    """`shutil.get_terminal_size` points at shutil.py; `Mailer.deliver` at class Mailer."""
+    """`shutil.get_terminal_size` points at shutil.py, `Mailer.deliver` at class Mailer,
+    and `flate.NewWriter` at the directory — in go, rust and java the thing before the
+    dot is a package, and a package is a folder rather than a file."""
     _, rel, _, parent = definition
-    stem = rel.rsplit("/", 1)[-1].split(".", 1)[0]
-    return scope in (stem, parent) or parent.endswith(f".{scope}")
+    head, _, name = rel.rpartition("/")
+    stem = name.split(".", 1)[0]
+    folder = head.rsplit("/", 1)[-1]
+    return scope in (stem, parent, folder) or parent.endswith(f".{scope}")
 
 
 def _to_row(r: sqlite3.Row) -> Row:

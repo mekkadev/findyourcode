@@ -5,7 +5,9 @@ this repository. nothing is averaged over runs it did not have, and the settings
 that lost are printed next to the settings that won.
 
 **corpus** — the cpython 3.11 standard library as it ships in this container:
-672 files, 15 000 chunks, 14 439 symbols, 37 634 call sites.
+672 files, 15 000 chunks, 14 455 symbols, 38 342 call sites. two more corpora,
+in go and in java, are measured further down under "a corpus that is not
+python" — and they are where the least flattering numbers live.
 **model** — the default `local` provider, `paraphrase-multilingual-MiniLM-L12-v2`
 through onnx, one cpu.
 
@@ -133,7 +135,9 @@ answer is a module one call away from the module the question describes.
   graph          0.29   0.59   0.280      0.92   0.870
 ```
 
-ten results find what text alone needs twenty to find.
+ten results find what text alone needs twenty to find — on this corpus. on the
+go and java corpora further down it finds nothing at all, which is the most
+important sentence on this page.
 
 seventeen cases is a small set and each case is worth 0.06, so treat the gap as
 a direction, not a measurement. how it was built, so you can judge it: a
@@ -287,6 +291,95 @@ eight calls out of 1265, and not one eval number moved. javascript, where the
 pattern should have been strongest, gains nothing at all: npm is written in
 commonjs, so the imports are `require()` calls and never look like imports to a
 grammar. forty lines and a regex-based statement parser, deleted.
+
+## a corpus that is not python
+
+every number above comes from one corpus in one language, which is the weakest
+thing about them. so the same commands were run against two more:
+
+```
+                                 files   chunks  symbols  call sites   index
+  ---------------------------------------------------------------------------
+  cpython 3.11 stdlib              672   15 000   14 455      38 342    305s
+  go stdlib, 24 packages          1042   14 722   12 237      32 711    351s
+  openjdk 21, java.base + http    2128   41 398   40 736      84 209    825s
+```
+
+the ranking transfers. the call graph does not.
+
+```
+                        ordinary questions          multi-hop questions
+                    r@1   r@3   r@10    MRR      no graph   graph    MRR
+  -------------------------------------------------------------------------
+  python (36 / 17)  0.83  0.92  0.92  0.870        0.41     0.59   0.238 → 0.280
+  go     (28 / 11)  0.57  0.82  0.93  0.702        0.45     0.45   0.189 → 0.189
+  java   (26 / 14)  0.69  0.88  0.96  0.781        0.36     0.36   0.115 → 0.115
+```
+
+on go and on java the call graph is worth **exactly zero** — every column
+identical with `--no-graph`, at `-n 10` and at `-n 3`, while the same two
+commands on python move recall@10 from 0.41 to 0.59. it is still safe: no
+ordinary question moves on any of the three. but the multi-hop gain this project
+leads with is a python result, and until it is shown on a second language it
+should be read as one.
+
+why, measured rather than guessed:
+
+```
+                              candidates   gold among      gold also inside
+                               per query   the candidates  the reach window
+  ---------------------------------------------------------------------------
+  python                              63   13 of 17        10 of 17
+  go                                  39    6 of 11         4 of 11
+  java                                79    7 of 14         3 of 14
+```
+
+two different failures wearing the same face. **go extracts less**: 39
+candidates where python finds 63, and the answer is among them only half the
+time. **java extracts plenty and then throws it away**: the reach window is an
+absolute rank — the top 400 — so on 2.8 times the chunks it is 2.8 times
+stricter, and 7 reachable golds become 3. widening it does not help either:
+`graph_reach` at 10 leaves java's multi-hop recall@10 at 0.36, at 20 it drops to
+0.29, because what comes in with the answer is worse than the answer is good.
+
+the go answers are not lost, only deep: without the graph at all, `-n 20` finds
+0.73 of them. so there is a real gain sitting there that this design does not
+reach.
+
+four bugs were found on the way and fixed, and they are worth naming because
+none of them moved a single metric:
+
+- `new HashMap<String, Charset>()` recorded a call to `Charset`, and
+  `new FutureTask<T>()` recorded nothing at all — a parameterised constructor
+  names its type first and its arguments after, and the code read the last
+  identifier. one call site in four, in java.
+- `await`, `format`, `println` and `printf` were on the control-flow blocklist,
+  which is meant for what a regex mistakes for a call. they are ordinary methods
+  in java, and `CountDownLatch.await` is exactly what a multi-hop question is
+  about.
+- `inf.getBytesWritten()` fell through to "a definition in the caller's own file
+  wins" and answered the caller's private helper of the same name. a qualifier
+  that matches nothing still rules the neighbours out: whoever `inf` is, the
+  method is not the caller's.
+- `flate.NewWriter` did not resolve, because a qualifier was compared to file
+  names and in go, rust and java a package is a folder.
+
+they made the graph more correct and retrieval no better, which is its own kind
+of answer: what stands between here and a graph that works on java is not a list
+of bugs. it is that java says `inf.getBytesWritten()` where python says
+`linecache.getline()`, and the receiver is a variable whose type this tool never
+looks up. of 13 348 lowercase java receivers, not one resolves.
+
+the short-query blend, on the other hand, transfers and then some — it is worth
+most on the corpus with the most chunks:
+
+```
+                     ordinary MRR, one blend    ...and with the short one
+  ------------------------------------------------------------------------
+  python                            0.850                        0.870
+  go                                0.702                        0.702
+  java                              0.724                        0.781
+```
 
 ## asking in another language
 

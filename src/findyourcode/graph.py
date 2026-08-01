@@ -40,17 +40,21 @@ _IDENT_TYPES = {
     "word",
 }
 
+_PARAMETERISED = {"generic_type", "scoped_type_identifier", "parameterized_type"}
 _WINDOW_SUFFIX = re.compile(r"\s*\[\d+/\d+\]$")
 _TEXT_CALL = re.compile(r"(?:([A-Za-z_][A-Za-z0-9_]*)\s*\.\s*)?\b([A-Za-z_][A-Za-z0-9_]{2,})\s*\(")
 _IDENT_TAIL = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 # Control flow and casts look exactly like calls to a regex, and to some grammars.
+# Only words that are never a method anywhere belong here: `format`, `println` and
+# `await` are keywords in one language and ordinary methods in the next, and a name
+# defined nowhere costs nothing anyway — it simply resolves to no edge.
 _KEYWORDS = (
     "if elif else for while do switch case catch except finally with match when "
-    "return yield await throw raise defer go func function def fn fun lambda "
-    "print println printf sprintf format echo len sizeof typeof instanceof "
+    "return yield throw raise defer go func function def fn fun lambda "
+    "len sizeof typeof instanceof "
     "int str bool float double char byte long short void var let const new delete "
-    "require import include using assert panic recover super this self "
+    "require import include using panic recover super this self "
     "defmodule defp defmacro defstruct defimpl defprotocol defdelegate"
 )
 _NOT_A_CALLEE = frozenset(_KEYWORDS.split(" "))
@@ -194,7 +198,13 @@ def _last_identifier(node, source: bytes) -> str | None:
     """`store.search_vector(...)` is an edge to search_vector, not to store."""
     if node.type in _IDENT_TYPES:
         return _text(node, source)
-    for child in reversed(node.named_children):
+    children = node.named_children
+    if node.type in _PARAMETERISED and children:
+        # `new HashMap<String, Charset>()` constructs a HashMap. Reading the last
+        # identifier here answers Charset, and reading `new FutureTask<T>()` answers
+        # a one-letter type variable that is then dropped as too short.
+        return _last_identifier(children[0], source)
+    for child in reversed(children):
         found = _last_identifier(child, source)
         if found:
             return found

@@ -567,3 +567,63 @@ def test_a_corpus_smaller_than_the_window_is_not_a_gated_one(repo):
     store.close()
     reached = [h for h in hits if h.graph is not None]
     assert reached and all(h.graph <= UNGATED_WEIGHT for h in reached)
+
+
+def test_a_parameterised_constructor_names_the_type_it_constructs(repo):
+    """`new HashMap<String, Charset>()` constructs a HashMap. Reading the last
+    identifier answered Charset, and `new FutureTask<T>()` answered a type variable
+    short enough to be thrown away — one call site in four, in java."""
+    files = {
+        "HashMap.java": "class HashMap { HashMap() {} }\n",
+        "Charset.java": "class Charset { Charset() {} }\n",
+        "Cache.java": (
+            "class Cache {\n  void build() {\n    var m = new HashMap<String, Charset>();\n  }\n}\n"
+        ),
+    }
+    _cfg, _embedder, store = _index(repo(files))
+    edges = store.edges_from([_id(store, "Cache.java")])
+
+    assert [e.name for e in edges] == ["HashMap"]
+    store.close()
+
+
+def test_a_receiver_that_resolves_to_nothing_does_not_fall_back_to_the_neighbours(repo):
+    """`inf.getBytesWritten()` is somebody else's method, whoever `inf` is. Preferring
+    the caller's own file there answers its private helper of the same name — a wrong
+    edge produced confidently, which is worse than no edge at all."""
+    files = {
+        "stream/writer.java": (
+            "class Writer {\n"
+            "  void write(Deflater def) {\n"
+            "    def.deflate();\n"
+            "  }\n"
+            "}\n"
+            "\n"
+            "class Helper {\n"
+            "  void deflate() {}\n"
+            "}\n"
+        ),
+        "zip/deflater.java": "class Deflater {\n  void deflate() {}\n}\n",
+    }
+    _cfg, _embedder, store = _index(repo(files))
+    edges = store.edges_from([_id(store, "stream/writer.java")])
+    targets = {store.rows([e.dst])[e.dst].rel for e in edges if e.name == "deflate"}
+
+    assert "zip/deflater.java" in targets
+    assert all(e.weight < 1.0 for e in edges if e.name == "deflate")
+    store.close()
+
+
+def test_a_method_named_like_a_keyword_somewhere_else_is_still_a_call(repo):
+    """`latch.await()` and `String.format(...)` are ordinary java methods. The
+    blocklist is there for control flow a regex mistakes for a call, and a name
+    defined nowhere costs nothing — it simply resolves to no edge."""
+    files = {
+        "Latch.java": "class Latch {\n  void await() {}\n}\n",
+        "Worker.java": "class Worker {\n  void run(Latch latch) {\n    latch.await();\n  }\n}\n",
+    }
+    _cfg, _embedder, store = _index(repo(files))
+    edges = store.edges_from([_id(store, "Worker.java")])
+
+    assert [e.name for e in edges] == ["await"]
+    store.close()

@@ -50,6 +50,16 @@ notable changes, newest first. semver.
 - `examples/eval_oneword.json`, and a `default` row in `fyc eval --sweep` so the
   rows around it have something to be read against.
 
+- two more corpora: 24 packages of the go standard library and openjdk 21's
+  `java.base`, with `examples/eval_go.json`, `examples/eval_go_multihop.json`,
+  `examples/eval_java.json` and `examples/eval_java_multihop.json`. the ranking
+  transfers — mrr 0.702 on go, 0.781 on java against 0.870 on python — and the
+  call graph does not transfer at all: on both it is worth exactly zero, every
+  column identical with `--no-graph`. the diagnosis, the failure modes (go
+  extracts half as many candidates, java's absolute reach window throws away what
+  it does extract) and the four resolver bugs found on the way are in
+  `docs/BENCHMARKS.md` under "a corpus that is not python".
+
 ### measured and not shipped
 
 - a second propagation hop. the premise holds — for 5 of the 17 multi-hop
@@ -73,6 +83,19 @@ all three are in `docs/BENCHMARKS.md` with their tables. none is in the code.
 three adversarial review passes over the new code, each finding reproduced
 before it was believed:
 
+- `new HashMap<String, Charset>()` recorded a call to `Charset` and
+  `new FutureTask<T>()` recorded nothing: a parameterised constructor names its
+  type first and its arguments after, and the code read the last identifier. one
+  java call site in four.
+- `await`, `format`, `println` and `printf` sat on the control-flow blocklist,
+  which is for what a regex mistakes for a call. they are ordinary methods in
+  java, and `CountDownLatch.await` is what a multi-hop question is about.
+- a qualifier that matched nothing still fell through to "a definition in the
+  caller's own file wins", so `inf.getBytesWritten()` answered the caller's own
+  private helper — a wrong edge produced confidently. whoever `inf` is, the
+  method is not the caller's.
+- a package qualifier was compared to file names only, so `flate.NewWriter` never
+  resolved: in go, rust and java a package is a folder.
 - past `-n 350` the call graph switched itself off and said nothing: the window
   is clamped at the vector index's own limit while the page is not, so the two
   met and every candidate outside the page was already in it.

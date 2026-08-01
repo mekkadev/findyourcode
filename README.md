@@ -91,8 +91,16 @@ argues for it.
 that gate is what makes it free: on ordinary queries the ranking is not merely
 close but identical, question for question — mrr 0.870 with the graph and
 without it. on questions whose answer lives one call away, ten results find what
-text alone needs twenty to find. both claims are one command each, in
-[benchmarks](https://github.com/mekkadev/findyourcode/blob/main/docs/BENCHMARKS.md).
+text alone needs twenty to find.
+
+that second number is a python number. the same measurement on the go standard
+library and on openjdk says the graph is worth exactly zero there — safe, but
+worth nothing — and
+[benchmarks](https://github.com/mekkadev/findyourcode/blob/main/docs/BENCHMARKS.md)
+has the diagnosis: java writes `inf.getBytesWritten()` where python writes
+`linecache.getline()`, and a receiver is a variable whose type this tool never
+looks up. that is the honest state of the idea, and the most interesting thing
+in the repository.
 
 ## agents
 
@@ -158,7 +166,10 @@ that goes to the model. editing one function re-embeds one function.
 
 ## numbers
 
-cpython 3.11 stdlib — 672 files, 15k chunks, one cpu, default model:
+three corpora, one cpu, default model — the cpython 3.11 standard library
+(672 files, 15k chunks), 24 packages of the go standard library (1042 files,
+15k chunks) and openjdk 21's `java.base` (2128 files, 41k chunks). the cpython
+one, in detail:
 
 ```
 first index      305s
@@ -181,6 +192,10 @@ which is what people actually type. mrr 0.802 with one blend for every query,
 
 ask in russian and the same 26 questions still land on english code: recall@10
 0.81 against 0.88 for english, where bm25 alone gets 0.27.
+
+the ranking holds up on the other two corpora — mrr 0.702 on go, 0.781 on java —
+and the call graph does not transfer at all. that is measured, diagnosed and
+written down rather than left out.
 
 the settings that lost are printed next to the settings that won —
 [docs/BENCHMARKS.md](https://github.com/mekkadev/findyourcode/blob/main/docs/BENCHMARKS.md) has the fusion sweep, the multi-hop set,
@@ -235,7 +250,7 @@ unknown extensions still get indexed through the line-window fallback.
 ## development
 
 ```bash
-pytest                     # 150 tests on the hash provider — offline, deterministic
+pytest                     # 153 tests on the hash provider — offline, deterministic
 FYC_TEST_REAL_MODEL=1 pytest tests/test_real_model.py   # the real model, ~220mb
 cd examples/demo_repo && fyc index && fyc find "checking the password on sign in"
 ```
