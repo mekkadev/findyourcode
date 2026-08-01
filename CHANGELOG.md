@@ -2,7 +2,7 @@
 
 notable changes, newest first. semver.
 
-## [0.4.0] - 2026-07-31
+## [0.4.0] - 2026-08-01
 
 ### added
 
