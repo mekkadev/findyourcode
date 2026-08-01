@@ -282,8 +282,11 @@ no server, no daemon, no vector database and no api key.
 
 ## next
 
-- edges from imports and type references, not only calls
-- query expansion for one-word queries
+- the multi-hop ceiling is selection, not supply: twelve of the seventeen
+  questions have their answer among the call neighbours and eight of them reach
+  the page. one signal separated right from wrong; there is probably another
+- a corpus that is not the python standard library. every number here comes from
+  one, and the shape of a call graph is exactly the thing that differs
 - publish to pypi
 
 ## stack
