@@ -25,6 +25,19 @@ notable changes, newest first. semver.
   one command.
 - `fyc status` reports the size of the graph.
 
+### measured and not shipped
+
+- a second propagation hop. the premise holds — for 5 of the 17 multi-hop
+  questions the answer is two calls away, and two hops do reach it — but the
+  candidate pool goes from ~40 to ~250 for the same five slots, so it arrives
+  ranked 285th of its own pool. worse, at `graph_weight = 0.8` it hands back the
+  whole win the graph buys there, recall@10 0.53 → 0.41.
+- imports read into a name → module map, to settle a bare call to an imported
+  name. eight of 1265 ambiguous references on the stdlib, zero on npm's own
+  source, no eval number moved.
+
+both are in `docs/BENCHMARKS.md` with their tables. neither is in the code.
+
 ### fixed
 
 two adversarial review passes over the new code, each finding reproduced before

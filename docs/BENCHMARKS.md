@@ -128,6 +128,41 @@ whether some cheaper signal could tell a right neighbour from a wrong one — is
 it corroborated by several results, is the name resolved or guessed, is it a
 callee or a caller — is measured in "what does not separate them" below.
 
+## a second hop, measured and rejected
+
+propagation follows one call edge. following two looks obviously right — and the
+premise checks out: for 5 of the 17 multi-hop questions the gold module is two
+calls from the text match, not one, and a second hop does reach them.
+
+it changes nothing, at any decay:
+
+```
+  decay      multi-hop r@10   stdlib MRR   russian MRR
+  -----------------------------------------------------
+  0 (off)              0.47        0.850         0.611
+  0.25                 0.47        0.850         0.609
+  0.4                  0.47        0.850         0.607
+  0.5                  0.47        0.850         0.606
+  0.7                  0.47        0.850         0.607
+```
+
+not one case moves, because supply was never the problem. one hop offers about
+40 candidates for five slots; two offer about 250, and the newly reached gold
+arrives ranked 285th, 40th, 32nd, 15th and 7th of its own pool. handing out more
+slots makes it worse rather than better — at `graph_limit = 20` the second hop
+drops multi-hop recall@10 from 0.47 to 0.41 — and the one setting where the
+graph genuinely buys recall gives all of it back:
+
+```
+                                     multi-hop r@10     MRR
+  ------------------------------------------------------------
+  graph_weight 0.8, one hop                     0.53   0.257
+  graph_weight 0.8, second hop at 0.5           0.41   0.239
+```
+
+being two calls from a text match is barely evidence at all; on this corpus it
+is mostly `os.path`. it cost about 1ms of the 42, and it is not in the code.
+
 ## imports as a qualifier, measured and rejected
 
 `linecache.getline(...)` says which of the four `getline` definitions is meant.
