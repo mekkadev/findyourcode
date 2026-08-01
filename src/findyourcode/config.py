@@ -59,10 +59,11 @@ class Config:
     per_file: int = 2
 
     graph: bool = True
-    graph_weight: float = 0.65
+    graph_weight: float = 0.85
     graph_limit: int = 5
     graph_seeds: int = 10
     graph_ceiling: float = 0.95
+    graph_reach: int = 5
     trace_depth: int = 3
     trace_fanout: int = 2
     trace_callers: int = 2

@@ -57,8 +57,10 @@ def search(
     filters = filters or Filters()
     depth = max(limit * cfg.oversample, 50)
     fusion = fusion or cfg.fusion
+    use_graph = cfg.graph if graph is None else graph
 
     query_vector = None
+    near: set[int] | None = None
     dense: list[tuple[int, float]] = []
     sparse: list[tuple[int, float]] = []
     if mode in ("hybrid", "semantic"):
@@ -68,7 +70,14 @@ def search(
         # under a brute-force scan and NULL distances under sqlite-vec.
         if np.any(vector):
             query_vector = vector
-            dense = store.search_vector(query_vector, depth, filters)
+            # One list, read twice: the head of it is the dense ranking as before, and
+            # the tail is only ever consulted to ask whether a call-graph neighbour is
+            # somewhere the query points at all. See `_propagate`.
+            reach = depth * cfg.graph_reach if use_graph and cfg.graph_reach > 1 else depth
+            dense = store.search_vector(query_vector, reach, filters)
+            if reach > depth:
+                near = {cid for cid, _ in dense}
+                dense = dense[:depth]
     if mode in ("hybrid", "lexical"):
         sparse = store.search_lexical(query, depth, filters)
 
@@ -93,8 +102,8 @@ def search(
     else:
         _score_blend(hits, cfg, lexical_used=bool(sparse), semantic_used=bool(dense))
 
-    if cfg.graph if graph is None else graph:
-        reached = _propagate(store, hits, cfg, filters, query_vector)
+    if use_graph:
+        reached = _propagate(store, hits, cfg, filters, near)
         if query_vector is not None and reached:
             _fill_missing_semantics(store, hits, query_vector)
 
@@ -241,7 +250,7 @@ def _by_relevance(store: Store, ids: list[int], query_vector, edges) -> list[tup
 
 
 def _propagate(
-    store: Store, hits: dict[int, Hit], cfg: Config, filters: Filters, query_vector=None
+    store: Store, hits: dict[int, Hit], cfg: Config, filters: Filters, near: set[int] | None = None
 ) -> set[int]:
     """Spread the score of the strongest results along call edges.
 
@@ -249,7 +258,15 @@ def _propagate(
     Letting a call edge push a text match up the page cost 0.016 MRR on the stdlib
     set for nothing, so a neighbour only ever enters below the best direct answer:
     structure is a reason to read something, not a reason to trust it more than the
-    query itself."""
+    query itself.
+
+    `near` is the reach window: the chunks the query ranks within `graph_reach` times
+    the retrieval depth. A call edge is evidence about *which* nearly-relevant chunk to
+    surface, not evidence that an irrelevant one is relevant, so a neighbour the query
+    ranks nowhere is dropped however loudly the structure argues for it. Measured on the
+    cpython index, this is what makes `graph_weight` safe to raise: the neighbours that
+    used to displace direct answers when it went up sit at dense rank 700, 1500, 2000 or
+    outside the top 3000 entirely, while the ones worth having sit at 120 to 640."""
     seeds = sorted(hits.values(), key=lambda h: -h.score)[: cfg.graph_seeds]
     seeds = [hit for hit in seeds if hit.score > 0]
     if not seeds:
@@ -273,7 +290,11 @@ def _propagate(
         if source is not None and edge.src != edge.dst:
             collect(edge.src, source, edge.weight, f"calls {edge.name}")
 
-    candidates = {cid: value for cid, value in boosts.items() if cid not in hits}
+    candidates = {
+        cid: value
+        for cid, value in boosts.items()
+        if cid not in hits and (near is None or cid in near)
+    }
     if not candidates:
         return set()
 

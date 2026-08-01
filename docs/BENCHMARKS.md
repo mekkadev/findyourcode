@@ -22,8 +22,8 @@ not as a claim about your repository.
 ```
 first index      305s     672 files, 15k chunks
 re-index         2.4s     nothing changed
-search            40ms    over 15k chunks
-  with graph      42ms
+search            45ms    over 15k chunks
+  without the graph 38ms
 cold start       2.6s     python starting and the model loading
 on disk         70.6mb    of which the call graph is 2.7mb
 ```
@@ -93,20 +93,15 @@ answer is a module one call away from the module the question describes.
 `shutil.py`.
 
 ```
-                            results  found     MRR
-  --------------------------------------------------
-  no graph                       10   0.41   0.238
-  no graph                       12   0.47   0.243
-  no graph                       13   0.53   0.248
-  graph                          10   0.47   0.247
-  graph, graph_weight 0.8        10   0.53   0.257
+                     multi-hop                ordinary
+                  r@3   r@10     MRR       r@3     MRR
+  ------------------------------------------------------
+  no graph       0.24   0.41   0.238      0.89   0.850
+  graph          0.29   0.59   0.280      0.89   0.850
 ```
 
-the graph finds in ten results what text alone needs twelve to find, and at
-`graph_weight = 0.8` what text needs thirteen to find. the default is 0.65
-because 0.8 costs recall@3 on the ordinary set (0.89 → 0.86); if your questions
-look more like the multi-hop set than the ordinary one, it is one line of
-`.findyourcode.toml`.
+ten results find what text alone needs twenty to find, and the ordinary set is
+not merely close but identical, question for question.
 
 seventeen cases is a small set and each case is worth 0.06, so treat the gap as
 a direction, not a measurement. how it was built, so you can judge it: a
@@ -116,17 +111,51 @@ the two modules. two of the twenty-two candidates were dropped because the call
 turned out not to exist — `pickle` does not call `copyreg` by name, `inspect`
 does not call `dis` by name. none was dropped for scoring badly.
 
-of the 17, the gold module is reachable through the graph from the top-10 text
-results in 13, and 8 make it onto the page. the gap is not extraction and it is
-not the number of slots either — `graph_limit` from 3 to 20 does not move either
-set by a single case. what binds is the score a graph-only chunk is allowed to
-have: capped at `graph_weight` and below the best direct answer, it can only
-displace text matches that are already scoring under 0.65. raising that cap is
-the one lever, and it is the trade in the table above.
+## what makes the graph safe to listen to
 
-whether some cheaper signal could tell a right neighbour from a wrong one — is
-it corroborated by several results, is the name resolved or guessed, is it a
-callee or a caller — is measured in "what does not separate them" below.
+for a while it was not. the graph had to be kept quiet — `graph_weight` 0.65 —
+because turning it up traded one set against the other: at 0.8 the multi-hop set
+went to recall@10 0.53 and the ordinary set gave up recall@3, 0.89 → 0.86.
+
+the number of candidates was never the problem. `graph_limit` from 3 to 20 does
+not move either set by a single case: what binds is the score a graph-only chunk
+is allowed, and turning that up let the wrong neighbours in with the right ones.
+so the question was whether anything cheap tells them apart. most of what you
+would reach for does not:
+
+```
+  1877 graph candidates over 53 queries, 141 of them a gold file (7.5%)
+
+  predicate                              kept    gold   precision   vs base
+  --------------------------------------------------------------------------
+  reached by two or more results          330      25       0.076      1.0x
+  it is called by a result                1281     86       0.067      0.9x
+  it calls a result                        586     49       0.084      1.1x
+  the strongest result was rank 1          352     21       0.060      0.8x
+  the name resolved exactly, not guessed   752    116       0.154      2.1x
+  the query ranks it in the top 400        299     82       0.274      3.7x
+```
+
+corroboration is worthless. direction is worthless. the rank of the result it
+came from is worthless. what separates them is where the *query* puts the
+candidate — not how strongly something points at it.
+
+not its cosine, though: absolute thresholds, cosine relative to the top hit and
+cosine relative to the retrieval floor all cost ordinary recall, because the
+scale shifts from query to query. the rank does not. so the dense index is asked
+for 400 instead of 80 — the first 80 are the ranking exactly as before, and the
+rest is consulted only to ask whether a call neighbour is somewhere the query
+points at all. the neighbours that used to do the damage sit at rank 700, 1500,
+2000 or outside the top 3000; the ones worth having sit between 120 and 640.
+
+with that gate the weight stops being a trade. `graph_weight` from 0.65 to 0.95
+all leave the ordinary set at mrr 0.850 with not one question changing rank, so
+the default is 0.85 and the multi-hop set keeps the whole gain.
+
+it costs one deeper read: 38ms → 45ms per query on 15k chunks. it is not free of
+misses either — 12 of the 17 multi-hop questions have their gold module among
+the graph candidates and 4 of those sit outside the window, at rank 635, 640,
+970 and 1417. widening it lets the damaging ones back in.
 
 ## a second hop, measured and rejected
 
@@ -134,7 +163,8 @@ propagation follows one call edge. following two looks obviously right — and t
 premise checks out: for 5 of the 17 multi-hop questions the gold module is two
 calls from the text match, not one, and a second hop does reach them.
 
-it changes nothing, at any decay:
+it changes nothing, at any decay (measured against the `graph_weight = 0.65` of
+the time, before the reach window above existed):
 
 ```
   decay      multi-hop r@10   stdlib MRR   russian MRR
@@ -161,7 +191,7 @@ graph genuinely buys recall gives all of it back:
 ```
 
 being two calls from a text match is barely evidence at all; on this corpus it
-is mostly `os.path`. it cost about 1ms of the 42, and it is not in the code.
+is mostly `os.path`. it cost about a millisecond, and it is not in the code.
 
 ## imports as a qualifier, measured and rejected
 
@@ -194,7 +224,7 @@ english and you are not. the same 26 questions, translated:
                      recall@1  recall@3  recall@10     MRR
   ---------------------------------------------------------
   english                 0.77      0.88       0.88   0.821
-  russian                 0.54      0.65       0.81   0.611
+  russian                 0.54      0.69       0.81   0.632
   russian, bm25 only      0.12      0.15       0.27   0.154
 ```
 

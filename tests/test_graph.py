@@ -1,11 +1,11 @@
 import json
 
 from findyourcode import cli
-from findyourcode.config import load_config
+from findyourcode.config import Config, load_config
 from findyourcode.embeddings import get_embedder
 from findyourcode.indexer import build_index
-from findyourcode.search import build_trace, search
-from findyourcode.store import Store
+from findyourcode.search import Hit, _propagate, build_trace, search
+from findyourcode.store import Filters, Store
 
 FILES = {
     "web/routes.py": (
@@ -465,4 +465,55 @@ def test_one_popular_name_does_not_spend_the_whole_row_budget(repo, monkeypatch)
     monkeypatch.setattr(store_module, "MAX_EDGES", 4)
     callers = {e.src for e in store.edges_to([_id(store, "hub.py")])}
     assert _id(store, "rare.py") in callers
+    store.close()
+
+
+def test_a_neighbour_the_query_points_nowhere_near_is_dropped(repo):
+    """The reach window: a call edge says which nearly-relevant chunk to surface, never
+    that an irrelevant one is relevant."""
+    _cfg, _embedder, store = _index(repo(FILES))
+    login = _id(store, "web/routes.py")
+    ticket = _id(store, "auth/session.py")
+    rows = store.rows([login])
+    cfg = Config(graph_weight=0.85)
+
+    def propagate(near):
+        hits = {login: Hit(row=rows[login], score=1.0)}
+        _propagate(store, hits, cfg, Filters(), near)
+        return set(hits) - {login}
+
+    assert propagate(None) == {ticket}  # no window: every neighbour, as before
+    assert propagate({login, ticket}) == {ticket}
+    assert propagate({login}) == set()  # the query ranks the callee nowhere
+    store.close()
+
+
+def test_the_reach_window_widens_one_query_rather_than_adding_a_second(repo):
+    """`graph_reach` reads further down the ranking the retriever was already producing,
+    and only when the graph is on — the head of that list is unchanged either way."""
+    files = {f"m{i}.py": f"def alpha_{i}(x):\n    return alpha_{i + 1}(x)\n" for i in range(30)}
+    cfg = load_config(repo(files), provider="hash")
+    embedder = get_embedder("hash")
+    store = Store(cfg.db_path)
+    build_index(cfg, embedder, store)
+
+    asked: list[int] = []
+    deep = store.search_vector
+
+    def spy(query, k, filters):
+        asked.append(k)
+        return deep(query, k, filters)
+
+    store.search_vector = spy  # type: ignore[method-assign]
+
+    def depths(**kw):
+        asked.clear()
+        search(store, embedder, "alpha", cfg, limit=10, **kw)
+        return list(asked)
+
+    cfg.graph_reach = 5
+    assert depths() == [400]  # one query, five times the retrieval depth of 80
+    assert depths(graph=False) == [80]
+    cfg.graph_reach = 1
+    assert depths() == [80]
     store.close()

@@ -16,7 +16,7 @@ notable changes, newest first. semver.
   returned, but that a strong result calls or that call it, join the page below
   the best direct answer — never above it. on ordinary queries the ranking is
   unchanged (mrr 0.850 either way); on a set of 17 multi-hop questions ten
-  results find what text alone needs thirteen to find.
+  results find what text alone needs twenty to find.
 - `search_code` takes `trace: true` over mcp, so an agent can follow a flow
   instead of reading four files to reconstruct it.
 - `examples/eval_multihop.json` and `examples/eval_stdlib_ru.json`, and
@@ -24,6 +24,19 @@ notable changes, newest first. semver.
 - `fyc eval --no-graph` and a `no graph` row in `--sweep`, so the claim above is
   one command.
 - `fyc status` reports the size of the graph.
+- a reach window, which is what makes the graph safe to listen to. a call edge is
+  evidence about *which* nearly-relevant chunk to surface, never that an
+  irrelevant one is relevant, so the dense index is asked for 400 candidates
+  instead of 80: the first 80 are the ranking exactly as before and the rest only
+  answers whether a call neighbour is somewhere the query points at all. of
+  everything tried — corroboration by several results, direction, the rank of the
+  result it came from, the candidate's own cosine — this is the only thing that
+  separated a neighbour worth having from one worth ignoring, and it is a rank
+  rather than a cosine because the cosine scale shifts per query. with it
+  `graph_weight` stops being a trade: 0.65 through 0.95 all leave the ordinary set
+  at mrr 0.850 with not one question changing rank, so it now ships at 0.85 and
+  the multi-hop set keeps recall@10 0.59 against 0.41 without the graph. costs one
+  deeper read, 38ms → 45ms per query.
 
 ### measured and not shipped
 

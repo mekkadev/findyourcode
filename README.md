@@ -4,7 +4,7 @@
 
 the first query is `reject a request without a valid ticket`. the word `reject`
 appears nowhere in that repository. grep cannot do this; an llm reading the whole
-repository can, but not in 40ms and not for free.
+repository can, but not in 45ms and not for free.
 
 the second query answers with a path instead of a list — the middleware, what it
 calls to verify the ticket, and what that calls in turn. that part is not
@@ -83,10 +83,16 @@ more than eight places — `run`, `handle`, `get` — is dropped rather than gue
 
 the same edges feed ranking: up to five chunks that neither retriever returned,
 but that a strong result calls or that call it, join the page *below* the best
-direct answer and never above it. on ordinary queries that leaves the ranking
-untouched — mrr 0.850 with the graph and without it. on questions whose answer
-lives one call away, ten results find what text alone needs twelve to find.
-both claims are one command each, in [benchmarks](https://github.com/mekkadev/findyourcode/blob/main/docs/BENCHMARKS.md).
+direct answer and never above it. a call edge is evidence about *which*
+nearly-relevant chunk to surface, never that an irrelevant one is relevant, so a
+neighbour the query ranks nowhere at all is dropped however loudly the structure
+argues for it.
+
+that gate is what makes it free: on ordinary queries the ranking is not merely
+close but identical, question for question — mrr 0.850 with the graph and
+without it. on questions whose answer lives one call away, ten results find what
+text alone needs twenty to find. both claims are one command each, in
+[benchmarks](https://github.com/mekkadev/findyourcode/blob/main/docs/BENCHMARKS.md).
 
 ## agents
 
@@ -150,7 +156,7 @@ cpython 3.11 stdlib — 672 files, 15k chunks, one cpu, default model:
 ```
 first index      305s
 re-index         2.4s    nothing changed
-search            42ms   over 15k chunks
+search            45ms   over 15k chunks
 cold start       2.6s    python starting and the model loading
 on disk           71mb   of which the call graph is 2.7mb
 ```
@@ -199,8 +205,9 @@ provider = "local"
 max_chunk_lines = 110      # larger chunks, coarser addressing
 alpha = 0.75               # weight of the semantic branch
 per_file = 2               # so one file cannot own the page
-graph_weight = 0.65        # how loudly a call edge argues for a chunk
+graph_weight = 0.85        # how loudly a call edge argues for a chunk
 graph_limit = 5            # how many the graph may add to a page
+graph_reach = 5            # how far past the page a neighbour may still be relevant
 exclude = ["**/generated/**", "*.pb.go"]
 ```
 
