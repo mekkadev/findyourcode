@@ -8,7 +8,7 @@ pip install -e ".[all]"
 pytest
 ```
 
-147 tests, all on the `hash` provider: deterministic, offline, no model download.
+150 tests, all on the `hash` provider: deterministic, offline, no model download.
 keep it that way — a test that needs the network or the 220mb default model does
 not belong in the suite. ci runs the same on python 3.10, 3.11 and 3.12, plus a
 smoke test over `examples/demo_repo`, which is also how to see it work for real:
