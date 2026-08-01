@@ -15,7 +15,7 @@ notable changes, newest first. semver.
 - ranking now uses those edges. up to five chunks that neither retriever
   returned, but that a strong result calls or that call it, join the page below
   the best direct answer — never above it. on ordinary queries the ranking is
-  unchanged (mrr 0.850 either way); on a set of 17 multi-hop questions ten
+  unchanged, question for question; on a set of 17 multi-hop questions ten
   results find what text alone needs twenty to find.
 - `search_code` takes `trace: true` over mcp, so an agent can follow a flow
   instead of reading four files to reconstruct it.
@@ -34,10 +34,11 @@ notable changes, newest first. semver.
   separated a neighbour worth having from one worth ignoring, and it is a rank
   rather than a cosine because the cosine scale shifts per query. with it
   `graph_weight` stops being a trade: 0.65 through 0.95 all leave the ordinary set
-  at mrr 0.850 with not one question changing rank, so it now ships at 0.85 and
+  at mrr 0.870 with not one question changing rank, so it now ships at 0.85 and
   the multi-hop set keeps recall@10 0.59 against 0.41 without the graph. costs one
-  deeper read, 38ms → 45ms per query.
-
+  deeper read, 29ms → 41ms per query. a window that cannot leave anything out —
+  `--mode lexical`, a repository smaller than the window, a page grown as wide as
+  it — is not a gate, and the graph goes back to 0.65 in all three.
 - a query of one or two words gets its own blend: `short_query_alpha = 0.55`
   instead of `alpha = 0.75`, on the reasoning that a sentence is ordinary english
   the model reads well while `epoll` is one rare token bm25 has always had. worth
@@ -48,13 +49,6 @@ notable changes, newest first. semver.
   alpha is one multiplier applied after retrieval.
 - `examples/eval_oneword.json`, and a `default` row in `fyc eval --sweep` so the
   rows around it have something to be read against.
-
-- a third adversarial pass, on the two changes above: `-n 350` and up silently
-  turned the call graph off entirely, because the window is clamped at the vector
-  index's own limit and the page had grown until the two met; a repository
-  smaller than the window was treated as gated when the window excluded nothing;
-  and `fyc eval --sweep --alpha X` printed a row labelled `default` that was not
-  the default. all three fixed, each with the test that fails without it.
 
 ### measured and not shipped
 
@@ -72,12 +66,20 @@ notable changes, newest first. semver.
   1. its best setting reached mrr 0.919 for +116% latency where the short-query
   blend reaches 0.938 for free, and cost the ordinary set 0.850 → 0.814.
 
-both are in `docs/BENCHMARKS.md` with their tables. neither is in the code.
+all three are in `docs/BENCHMARKS.md` with their tables. none is in the code.
 
 ### fixed
 
-two adversarial review passes over the new code, each finding reproduced before
-it was believed:
+three adversarial review passes over the new code, each finding reproduced
+before it was believed:
+
+- past `-n 350` the call graph switched itself off and said nothing: the window
+  is clamped at the vector index's own limit while the page is not, so the two
+  met and every candidate outside the page was already in it.
+- a repository smaller than the window counted as gated, when the window had
+  excluded nothing at all.
+- `fyc eval --sweep --alpha X` printed a row labelled `default` that was the
+  swept alpha with the short-query blend off.
 
 - the fanout cap counted definitions across all languages, so five javascript
   `handler`s deleted the edges of five python ones — in exactly the mixed-language
