@@ -219,11 +219,11 @@ def test_alpha_actually_moves_the_ranking():
         }
 
     semantic_heavy = pair()
-    _score_blend(semantic_heavy, Config(alpha=0.9), lexical_used=True)
+    _score_blend(semantic_heavy, Config(alpha=0.9).alpha, lexical_used=True)
     assert semantic_heavy[1].score > semantic_heavy[2].score
 
     lexical_heavy = pair()
-    _score_blend(lexical_heavy, Config(alpha=0.1), lexical_used=True)
+    _score_blend(lexical_heavy, Config(alpha=0.1).alpha, lexical_used=True)
     assert lexical_heavy[2].score > lexical_heavy[1].score
 
 

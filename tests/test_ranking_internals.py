@@ -155,6 +155,16 @@ def test_config_reads_toml_env_and_overrides(tmp_path, monkeypatch):
     monkeypatch.delenv("FYC_EXCLUDE")
     assert load_config(tmp_path, alpha=None).alpha == pytest.approx(0.4)
 
+    # The short-query blend is swept the same way as everything else, or it never
+    # gets swept: both knobs have to survive the string round-trip from the env.
+    monkeypatch.setenv("FYC_SHORT_QUERY_ALPHA", "0.35")
+    monkeypatch.setenv("FYC_SHORT_QUERY_WORDS", "4")
+    swept = load_config(tmp_path)
+    assert swept.short_query_alpha == pytest.approx(0.35)
+    assert swept.short_query_words == 4
+    monkeypatch.setenv("FYC_SHORT_QUERY_ALPHA", "-1")
+    assert load_config(tmp_path).short_query_alpha == pytest.approx(-1.0)
+
 
 def test_index_paths_are_relative_to_the_root(tmp_path):
     cfg = load_config(tmp_path)
@@ -203,4 +213,100 @@ def test_reranker_reorders_the_shortlist_and_rescales(monkeypatch, repo):
 
     single = search(store, embedder, "handler request", cfg, limit=1, reranker=Reranker("stub"))
     assert len(single) == 1  # nothing to reorder, and no crash
+    store.close()
+
+
+def test_short_queries_get_their_own_blend_and_long_ones_do_not():
+    """The whole promise of the short-query blend: it fires on `checksum` and on
+    nothing else. A threshold that leaked into long queries would silently reweight
+    every sentence the tool has ever been measured on."""
+    from findyourcode.search import blend_alpha, is_short
+
+    cfg = Config(alpha=0.75, short_query_words=3, short_query_alpha=0.55)
+
+    assert is_short("checksum", cfg) and blend_alpha("checksum", cfg) == 0.55
+    assert is_short("leap year", cfg) and blend_alpha("leap year", cfg) == 0.55
+    # A long identifier is still one word — length in characters is not the point.
+    assert blend_alpha("deserialize_untrusted_payload", cfg) == 0.55
+
+    assert not is_short("parsing command line arguments", cfg)
+    assert blend_alpha("parsing command line arguments", cfg) == 0.75
+    assert blend_alpha("three whole words", cfg) == 0.75  # the threshold is exclusive
+    assert blend_alpha("", cfg) == 0.75  # no words is not a short query
+
+    off_by_threshold = Config(alpha=0.75, short_query_words=0, short_query_alpha=0.55)
+    assert blend_alpha("checksum", off_by_threshold) == 0.75
+    off_by_alpha = Config(alpha=0.75, short_query_words=3, short_query_alpha=-1.0)
+    assert blend_alpha("checksum", off_by_alpha) == 0.75
+
+
+def test_a_one_word_query_leans_on_the_exact_match(repo, monkeypatch):
+    """`epoll` names one file and means nothing to a sentence model: on the real
+    stdlib index the vector branch answered `colorsys.py` and bm25 had `selectors.py`
+    all along. The disagreement is forced here so the test does not depend on which
+    way a model happens to lean — what it pins down is who wins when they disagree."""
+    root = repo(
+        {
+            "selectors.py": "def register(self, fileobj):\n    self._epoll.register(fileobj)\n",
+            "colorsys.py": "def rgb_to_hls(red, green, blue):\n    return red, green, blue\n",
+        }
+    )
+    cfg = load_config(root, provider="hash")
+    embedder = get_embedder("hash")
+    store = Store(cfg.db_path)
+    build_index(cfg, embedder, store)
+
+    ids = {row.rel: cid for cid, row in store.rows([1, 2]).items()}
+    lexical = store.search_lexical("epoll", 10, Filters())
+    assert [cid for cid, _ in lexical] == [ids["selectors.py"]], "the premise: bm25 knows"
+
+    # The vector branch is confidently wrong, exactly as it was on `epoll` for real.
+    monkeypatch.setattr(
+        store,
+        "search_vector",
+        lambda vector, k, filters: [(ids["colorsys.py"], 0.9), (ids["selectors.py"], 0.1)],
+    )
+
+    cfg.short_query_alpha = -1.0  # one blend for every query, the way it used to be
+    before = search(store, embedder, "epoll", cfg, limit=2)
+    cfg.short_query_alpha = 0.2
+    after = search(store, embedder, "epoll", cfg, limit=2)
+
+    assert before[0].row.rel == "colorsys.py"
+    assert after[0].row.rel == "selectors.py"
+    assert after[0].lexical is not None
+    store.close()
+
+
+def test_the_short_query_blend_leaves_long_queries_byte_identical(repo):
+    """Measured on the stdlib index: 46 long queries, not one changed row or score.
+    Here is that check in miniature, so a future threshold cannot quietly reweight
+    the sentences the project reports its numbers on."""
+    root = repo(
+        {
+            "auth/login.py": "def verify_password(login, password):\n    return compare(login)\n",
+            "auth/session.py": "def issue_token(user):\n    return sign(user)\n",
+            "ui/plot.py": "def draw_axis(canvas):\n    return canvas\n",
+        }
+    )
+    cfg = load_config(root, provider="hash")
+    embedder = get_embedder("hash")
+    store = Store(cfg.db_path)
+    build_index(cfg, embedder, store)
+
+    def page(query):
+        return [(h.row.rel, h.row.start_line, h.score) for h in search(store, embedder, query, cfg)]
+
+    long_queries = [
+        "where do we check the user password",
+        "issue a signed token for the session",
+        "drawing an axis on the canvas",
+    ]
+    cfg.short_query_alpha = -1.0
+    before = {q: page(q) for q in long_queries}
+    cfg.short_query_alpha = 0.1  # an extreme the blend would be very visible at
+    after = {q: page(q) for q in long_queries}
+
+    assert before == after
+    assert page("password") != []  # and the short query still answers
     store.close()

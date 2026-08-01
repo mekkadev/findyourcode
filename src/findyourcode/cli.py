@@ -303,6 +303,9 @@ def cmd_similar(args) -> int:
 
 def cmd_eval(args) -> int:
     cfg = load_config(args.root, alpha=args.alpha)
+    if args.alpha is not None:
+        # Naming an alpha means measuring that alpha, on every case in the set.
+        cfg.short_query_alpha = -1.0
     if not cfg.db_path.exists():
         print("no index here — run `fyc index` first", file=sys.stderr)
         return 2
@@ -323,6 +326,10 @@ def cmd_eval(args) -> int:
     if args.sweep:
         rows = []
         configured = cfg.alpha
+        # An alpha row has to mean what it says. With the short-query blend live, every
+        # one-word case in the set would ignore the alpha being swept and the column
+        # would read flat for reasons that have nothing to do with alpha.
+        tilt, cfg.short_query_alpha = cfg.short_query_alpha, -1.0
         for alpha in (0.0, 0.25, 0.5, 0.75, 1.0):
             cfg.alpha = alpha
             rows.append(
@@ -331,7 +338,17 @@ def cmd_eval(args) -> int:
                     evaluate(store, embedder, cfg, cases, args.limit, fusion="blend"),
                 )
             )
-        cfg.alpha = configured  # the rows below are not alpha sweeps; restore the real one
+        # The rows below are not alpha sweeps; restore the settings the project ships.
+        cfg.alpha = configured
+        rows.append(
+            (
+                "no short blend",
+                evaluate(store, embedder, cfg, cases, args.limit, fusion="blend"),
+            )
+        )
+        cfg.short_query_alpha = tilt
+        # Everything as shipped, so the rows around it have something to be read against.
+        rows.append(("default", evaluate(store, embedder, cfg, cases, args.limit)))
         for mode in ("semantic", "lexical"):
             rows.append(
                 (

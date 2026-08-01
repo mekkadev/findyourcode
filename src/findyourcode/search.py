@@ -30,6 +30,13 @@ class Hit:
     via: str = ""
 
 
+# What a call edge may argue with when there is no reach window to check it against —
+# `--mode lexical` embeds nothing, so nothing can say whether the query points at a
+# neighbour at all. It is the weight the graph was measured safe at before the window
+# existed; louder than that, ungated, costs the lexical set 0.011 mrr on the stdlib.
+UNGATED_WEIGHT = 0.65
+
+
 @dataclass
 class TraceNode:
     """One step of a call path: how we got here, and what this place calls in turn."""
@@ -100,7 +107,9 @@ def search(
     if fusion == "rrf":
         _score_rrf(hits, cfg)
     else:
-        _score_blend(hits, cfg, lexical_used=bool(sparse), semantic_used=bool(dense))
+        _score_blend(
+            hits, blend_alpha(query, cfg), lexical_used=bool(sparse), semantic_used=bool(dense)
+        )
 
     if use_graph:
         reached = _propagate(store, hits, cfg, filters, near)
@@ -274,10 +283,11 @@ def _propagate(
 
     seed_ids = [hit.row.id for hit in seeds]
     ceiling = seeds[0].score * cfg.graph_ceiling
+    loudest = cfg.graph_weight if near is not None else min(cfg.graph_weight, UNGATED_WEIGHT)
     boosts: dict[int, tuple[float, str]] = {}
 
     def collect(target: int, source: Hit, weight: float, label: str) -> None:
-        amount = cfg.graph_weight * source.score * weight
+        amount = loudest * source.score * weight
         total, first = boosts.get(target, (0.0, label))
         boosts[target] = (total + amount, first)
 
@@ -312,7 +322,7 @@ def _propagate(
         row = rows.get(cid)
         if row is None:
             continue
-        strength = min(amount, cfg.graph_weight)
+        strength = min(amount, loudest)
         hits[cid] = Hit(row=row, score=min(strength, ceiling), graph=strength, via=label)
     return set(rows)
 
@@ -328,12 +338,36 @@ def _fill_missing_semantics(store: Store, hits: dict[int, Hit], query_vector) ->
         hits[cid].semantic = float(np.dot(vector, query_vector))
 
 
+def is_short(query: str, cfg: Config) -> bool:
+    """Short is measured in words, not characters. `deserialize_untrusted_payload` is
+    long and still one word — and one word is the thing that makes a query hard."""
+    if cfg.short_query_words <= 0:
+        return False
+    return 0 < len(query.split()) < cfg.short_query_words
+
+
+def blend_alpha(query: str, cfg: Config) -> float:
+    """How much of the ranking the embedding gets to decide, for this query.
+
+    A sentence is mostly ordinary English and the model reads it better than BM25
+    ever will. `epoll` is not a sentence. It is one rare token that names a thing
+    living in exactly one file, the model has never seen it used as a word, and it
+    answers `colorsys` — while BM25, which needs nothing but the posting list, has
+    had the right file all along. So the two retrievers are weighted by how much
+    query there is to read.
+
+    Only the blend fusion has an alpha; under `--fusion rrf` this does nothing and
+    the rank-based weights apply unchanged."""
+    if cfg.short_query_alpha < 0 or not is_short(query, cfg):
+        return cfg.alpha
+    return cfg.short_query_alpha
+
+
 def _score_blend(
-    hits: dict[int, Hit], cfg: Config, lexical_used: bool, semantic_used: bool = True
+    hits: dict[int, Hit], alpha: float, lexical_used: bool, semantic_used: bool = True
 ) -> None:
     semantics = _minmax([h.semantic for h in hits.values()])
     lexicals = _minmax([h.lexical for h in hits.values()])
-    alpha = cfg.alpha
     if not lexical_used:
         alpha = 1.0
     elif not semantic_used:

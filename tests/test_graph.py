@@ -517,3 +517,18 @@ def test_the_reach_window_widens_one_query_rather_than_adding_a_second(repo):
     cfg.graph_reach = 1
     assert depths() == [80]
     store.close()
+
+
+def test_without_a_reach_window_the_graph_stays_quiet(repo):
+    """`--mode lexical` embeds nothing, so nothing can say whether the query points at
+    a neighbour at all. The edge still counts — it just does not get to shout."""
+    from findyourcode.search import UNGATED_WEIGHT
+
+    root = repo(FILES)
+    cfg, embedder, store = _index(root)
+    cfg.graph_weight = 0.95
+
+    hits = {h.row.rel: h for h in search(store, embedder, QUERY, cfg, mode="lexical")}
+    store.close()
+    assert hits["auth/session.py"].graph is not None
+    assert hits["auth/session.py"].graph <= UNGATED_WEIGHT

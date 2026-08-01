@@ -23,6 +23,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CASES = ROOT / "examples" / "eval_stdlib.json"
 MULTIHOP = ROOT / "examples" / "eval_multihop.json"
 RUSSIAN = ROOT / "examples" / "eval_stdlib_ru.json"
+ONEWORD = ROOT / "examples" / "eval_oneword.json"
 
 
 def main() -> int:
@@ -65,6 +66,8 @@ def main() -> int:
     if args.cases == DEFAULT_CASES:
         # The other two sets only mean anything against the stdlib they were written for.
         for label, extra in (
+            ("one- and two-word queries", ["eval", str(ONEWORD)]),
+            ("the same, one blend for every query", ["eval", str(ONEWORD), "--alpha", "0.75"]),
             ("multi-hop, text only", ["eval", str(MULTIHOP), "--no-graph"]),
             ("multi-hop, with the call graph", ["eval", str(MULTIHOP)]),
             ("the same questions in russian", ["eval", str(RUSSIAN)]),

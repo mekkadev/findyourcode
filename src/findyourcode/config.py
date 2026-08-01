@@ -68,6 +68,12 @@ class Config:
     trace_fanout: int = 2
     trace_callers: int = 2
 
+    # `fyc find "checksum"` gets its own blend: a query below this many words is
+    # scored with `short_query_alpha` instead of `alpha`. 0 words, or a negative
+    # alpha, restores one blend for every query.
+    short_query_words: int = 3
+    short_query_alpha: float = 0.55
+
     rerank: str = ""
     rerank_depth: int = 30
     fusion: str = "blend"

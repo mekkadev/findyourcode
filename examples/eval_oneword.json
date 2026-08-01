@@ -1,0 +1,18 @@
+[
+  { "query": "retry", "expect": ["logging/handlers.py", "urllib/request.py"], "note": "SocketHandler.retryTime; retry_http_basic_auth" },
+  { "query": "checksum", "expect": ["tarfile.py", "zipfile.py", "gzip.py"], "note": "header chksum, CRC-32" },
+  { "query": "daemon", "expect": ["threading.py", "multiprocessing/process.py", "socketserver.py"], "note": "daemon threads and processes" },
+  { "query": "mmap", "expect": ["multiprocessing/heap.py", "multiprocessing/shared_memory.py"], "note": "the only pure-python mmap users" },
+  { "query": "tokenize", "expect": ["tokenize.py"], "note": "also matches lib2to3/pgen2/tokenize.py" },
+  { "query": "semaphore", "expect": ["threading.py", "multiprocessing/synchronize.py", "asyncio/locks.py"] },
+  { "query": "symlink", "expect": ["shutil.py", "os.py", "pathlib.py"] },
+  { "query": "cookie", "expect": ["http/cookiejar.py", "http/cookies.py"] },
+  { "query": "netmask", "expect": ["ipaddress.py"] },
+  { "query": "epoll", "expect": ["selectors.py"] },
+  { "query": "dedent", "expect": ["textwrap.py"] },
+  { "query": "rounding", "expect": ["_pydecimal.py", "fractions.py"] },
+  { "query": "leap year", "expect": ["calendar.py", "datetime.py"] },
+  { "query": "lru cache", "expect": ["functools.py"] },
+  { "query": "chunked encoding", "expect": ["http/client.py"], "note": "Transfer-Encoding: chunked" },
+  { "query": "signal handler", "expect": ["asyncio/unix_events.py", "unittest/signals.py", "signal.py"] }
+]

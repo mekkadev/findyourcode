@@ -4,7 +4,7 @@
 
 the first query is `reject a request without a valid ticket`. the word `reject`
 appears nowhere in that repository. grep cannot do this; an llm reading the whole
-repository can, but not in 45ms and not for free.
+repository can, but not in 41ms and not for free.
 
 the second query answers with a path instead of a list — the middleware, what it
 calls to verify the ticket, and what that calls in turn. that part is not
@@ -146,6 +146,13 @@ through `fts5` — blended 0.75 to the vector side, then the graph adds what nei
 of them could reach. candidates that only bm25 returned get an exact cosine before
 ranking, otherwise one incidental keyword match outranks the right answer.
 
+how much of that blend the vectors get depends on how much query there is to read.
+a sentence is ordinary english and the model reads it better than bm25 ever will;
+`epoll` is one rare token naming a thing that lives in exactly one file, the model
+has never seen it used as a word, and it answers `colorsys.py` while bm25 had the
+right file all along. so under three words the blend tips to 0.55, which is worth
+mrr 0.802 → 0.938 on one-word queries and leaves every sentence byte-identical.
+
 the index is incremental twice over: files by sha256, chunks by the hash of the text
 that goes to the model. editing one function re-embeds one function.
 
@@ -156,17 +163,21 @@ cpython 3.11 stdlib — 672 files, 15k chunks, one cpu, default model:
 ```
 first index      305s
 re-index         2.4s    nothing changed
-search            45ms   over 15k chunks
+search            41ms   over 15k chunks
 cold start       2.6s    python starting and the model loading
 on disk           71mb   of which the call graph is 2.7mb
 ```
 
 36 queries against the whole stdlib — 26 by meaning, 10 by exact identifier:
-recall@1 0.81, recall@10 0.92, mrr 0.850. split them and the reason for two
+recall@1 0.83, recall@10 0.92, mrr 0.870. split them and the reason for two
 retrievers shows. on the identifier half the vectors collapse to recall@1 0.50
 where bm25 gets 0.90; on the meaning half bm25 is the one that falls behind. a
 benchmark of one shape only would have argued convincingly for deleting the
 branch that saves the other half.
+
+a third shape, `examples/eval_oneword.json`: 16 queries of one or two words,
+which is what people actually type. mrr 0.802 with one blend for every query,
+0.938 when a short query leans on the exact match instead.
 
 ask in russian and the same 26 questions still land on english code: recall@10
 0.81 against 0.88 for english, where bm25 alone gets 0.27.
@@ -204,6 +215,7 @@ changing models means `fyc index --reindex` rather than silently wrong results.
 provider = "local"
 max_chunk_lines = 110      # larger chunks, coarser addressing
 alpha = 0.75               # weight of the semantic branch
+short_query_alpha = 0.55   # ...and for a query of one or two words
 per_file = 2               # so one file cannot own the page
 graph_weight = 0.85        # how loudly a call edge argues for a chunk
 graph_limit = 5            # how many the graph may add to a page
@@ -223,7 +235,7 @@ unknown extensions still get indexed through the line-window fallback.
 ## development
 
 ```bash
-pytest                     # 141 tests on the hash provider — offline, deterministic
+pytest                     # 147 tests on the hash provider — offline, deterministic
 FYC_TEST_REAL_MODEL=1 pytest tests/test_real_model.py   # the real model, ~220mb
 cd examples/demo_repo && fyc index && fyc find "checking the password on sign in"
 ```

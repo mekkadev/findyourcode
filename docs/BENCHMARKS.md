@@ -13,17 +13,17 @@ through onnx, one cpu.
 python scripts/benchmark.py            # index this python's stdlib and score it
 ```
 
-36 hand-written queries against one corpus is a smoke test with a method
-attached, not a benchmark. read it as evidence that the decisions were measured,
-not as a claim about your repository.
+a hand-written set against one corpus is a smoke test with a method attached, not
+a benchmark. read it as evidence that the decisions were measured, not as a claim
+about your repository.
 
 ## cost
 
 ```
 first index      305s     672 files, 15k chunks
 re-index         2.4s     nothing changed
-search            45ms    over 15k chunks
-  without the graph 38ms
+search            41ms    over 15k chunks
+  without the graph 29ms
 cold start       2.6s     python starting and the model loading
 on disk         70.6mb    of which the call graph is 2.7mb
 ```
@@ -31,24 +31,29 @@ on disk         70.6mb    of which the call graph is 2.7mb
 ## fusion
 
 `examples/eval_stdlib.json` — 26 questions phrased as meaning, 10 as an exact
-identifier. one shape alone would have argued for deleting the branch that saves
-the other.
+identifier.
 
 ```console
 $ fyc eval examples/eval_stdlib.json --sweep
 
   setting            recall@1   recall@3  recall@10     MRR
   ---------------------------------------------------------
-  blend a=0              0.67       0.81       0.92   0.748
-  blend a=0.25           0.69       0.83       0.92   0.779
+  blend a=0              0.67       0.83       0.92   0.756
+  blend a=0.25           0.69       0.83       0.92   0.776
   blend a=0.5            0.75       0.92       0.92   0.829
-  blend a=0.75           0.81       0.89       0.92   0.850   <- default
-  blend a=1              0.64       0.81       0.89   0.720
-  semantic               0.64       0.78       0.89   0.714
+  blend a=0.75           0.81       0.89       0.92   0.850
+  blend a=1              0.64       0.83       0.89   0.727
+  no short blend         0.81       0.89       0.92   0.850
+  default                0.83       0.92       0.92   0.870
+  semantic               0.64       0.78       0.89   0.720
   lexical                0.67       0.81       0.92   0.748
-  rrf                    0.81       0.89       0.94   0.853
-  no graph               0.81       0.89       0.92   0.850
+  rrf                    0.81       0.86       0.94   0.850
+  no graph               0.83       0.92       0.92   0.870
 ```
+
+the alpha rows are measured with one blend for every query, or the sweep would be
+reporting the short-query blend below instead of alpha. `default` is everything
+as shipped; the rows around it are what each piece is worth.
 
 split the set by shape and the reason for keeping two retrievers is plain:
 
@@ -57,34 +62,59 @@ split the set by shape and the reason for keeping two retrievers is plain:
   ------------------------------------------------------------
   26 by meaning
     blend                   0.77      0.88       0.88   0.821
-    semantic only           0.69      0.85       0.88   0.755
+    semantic only           0.69      0.85       0.88   0.756
   10 by identifier
-    blend                   0.90      0.90       1.00   0.925
-    semantic only           0.50      0.60       0.90   0.608
-    lexical only            0.90      1.00       1.00   0.950
+    blend                   1.00      1.00       1.00   1.000
+    semantic only           0.50      0.60       0.90   0.625
+    lexical only            0.90      0.90       1.00   0.925
 ```
 
 neither branch survives alone: the vectors lose half the identifier queries, and
-bm25 is the one that falls behind on meaning. the blend is close to the better of
-the two on both halves, which is the whole point of paying for both.
+bm25 is the one that falls behind on meaning. the blend now beats both on both
+halves — the identifier half only after the short-query blend below.
 
-blend and rrf finish within noise of each other on this corpus — 0.850 against
-0.853, one case either way. blend stays the default for a reason the aggregate
-cannot show: rrf ranks by position only, so a single incidental keyword match at
-bm25 rank 1 can outrank the right answer, and that is what it did to
-`card.Token` on the demo repository. the blend sees the cosine as well and does
-not.
+blend and rrf finish level on this corpus, 0.850 against 0.850 before that. blend
+stays the default for a reason the aggregate cannot show: rrf ranks by position
+only, so a single incidental keyword match at bm25 rank 1 can outrank the right
+answer, and that is what it did to `card.Token` on the demo repository. the blend
+sees the cosine as well and does not.
+
+## how much query there is to read
+
+`fyc find "checksum"` is the most common thing a person types and the worst
+served. `examples/eval_oneword.json` — 16 one- and two-word queries, written
+down before anything was measured:
+
+```
+                          recall@1  recall@3  recall@10     MRR
+  ---------------------------------------------------------------
+  one blend for everything      0.75      0.81       1.00   0.802
+  short queries at alpha 0.55   0.88      1.00       1.00   0.938
+```
+
+a sentence is mostly ordinary english and the model reads it better than bm25
+ever will. `epoll` is not a sentence: it is one rare token naming a thing that
+lives in exactly one file, the model has never seen it used as a word, and it
+answers `colorsys.py` — while bm25, which needs nothing but the posting list, had
+`selectors.py` all along. so the two retrievers are weighted by how much query
+there is to read: under three words, alpha 0.55 instead of 0.75.
+
+it costs nothing — alpha is one multiplier applied after retrieval — and long
+queries are untouched, checked literally rather than statistically: all 46
+sentence-shaped queries in this repository return byte-identical pages, file,
+line and score, with the blend on and off. 0.40 to 0.65 all score the same on 16
+cases, so 0.55 is the middle of a plateau rather than a tuned value.
 
 ## the call graph
 
 two properties matter and they pull against each other: the graph must not
 disturb ordinary queries, and it must find things text cannot.
 
-**it does not disturb ordinary queries.** the `no graph` row above is identical
-to the default row. that is by construction: a chunk reached through the graph
-enters the page below the best direct answer and never above it, and at most
-five join a page. an earlier version let call edges push text matches *up* as
-well; it cost 0.016 mrr on this set for nothing and was removed.
+**it does not disturb ordinary queries.** the `no graph` row of the sweep is
+identical to `default`, question for question. that is by construction: a chunk
+reached through the graph enters the page below the best direct answer and never
+above it, at most five join a page, and one that the query ranks nowhere at all
+is dropped however loudly the structure argues for it.
 
 **multi-hop questions.** `examples/eval_multihop.json` — 17 questions whose
 answer is a module one call away from the module the question describes.
@@ -96,12 +126,11 @@ answer is a module one call away from the module the question describes.
                      multi-hop                ordinary
                   r@3   r@10     MRR       r@3     MRR
   ------------------------------------------------------
-  no graph       0.24   0.41   0.238      0.89   0.850
-  graph          0.29   0.59   0.280      0.89   0.850
+  no graph       0.24   0.41   0.238      0.92   0.870
+  graph          0.29   0.59   0.280      0.92   0.870
 ```
 
-ten results find what text alone needs twenty to find, and the ordinary set is
-not merely close but identical, question for question.
+ten results find what text alone needs twenty to find.
 
 seventeen cases is a small set and each case is worth 0.06, so treat the gap as
 a direction, not a measurement. how it was built, so you can judge it: a
@@ -115,7 +144,7 @@ does not call `dis` by name. none was dropped for scoring badly.
 
 for a while it was not. the graph had to be kept quiet — `graph_weight` 0.65 —
 because turning it up traded one set against the other: at 0.8 the multi-hop set
-went to recall@10 0.53 and the ordinary set gave up recall@3, 0.89 → 0.86.
+went to recall@10 0.53 and the ordinary set gave up recall@3.
 
 the number of candidates was never the problem. `graph_limit` from 3 to 20 does
 not move either set by a single case: what binds is the score a graph-only chunk
@@ -149,13 +178,14 @@ points at all. the neighbours that used to do the damage sit at rank 700, 1500,
 2000 or outside the top 3000; the ones worth having sit between 120 and 640.
 
 with that gate the weight stops being a trade. `graph_weight` from 0.65 to 0.95
-all leave the ordinary set at mrr 0.850 with not one question changing rank, so
+all leave the ordinary set at mrr 0.870 with not one question changing rank, so
 the default is 0.85 and the multi-hop set keeps the whole gain.
 
-it costs one deeper read: 38ms → 45ms per query on 15k chunks. it is not free of
-misses either — 12 of the 17 multi-hop questions have their gold module among
-the graph candidates and 4 of those sit outside the window, at rank 635, 640,
-970 and 1417. widening it lets the damaging ones back in.
+it costs one deeper read, 29ms → 41ms per query, and it is not free of misses
+either: 12 of the 17 multi-hop questions have their gold module among the graph
+candidates and 4 of those sit outside the window, at rank 635, 640, 970 and
+1417. widening it lets the damaging ones back in. `--mode lexical` embeds
+nothing, so no window can exist there and the graph goes back to arguing at 0.65.
 
 ## a second hop, measured and rejected
 
@@ -164,7 +194,7 @@ premise checks out: for 5 of the 17 multi-hop questions the gold module is two
 calls from the text match, not one, and a second hop does reach them.
 
 it changes nothing, at any decay (measured against the `graph_weight = 0.65` of
-the time, before the reach window above existed):
+the time, before the reach window existed):
 
 ```
   decay      multi-hop r@10   stdlib MRR   russian MRR
@@ -181,7 +211,7 @@ not one case moves, because supply was never the problem. one hop offers about
 arrives ranked 285th, 40th, 32nd, 15th and 7th of its own pool. handing out more
 slots makes it worse rather than better — at `graph_limit = 20` the second hop
 drops multi-hop recall@10 from 0.47 to 0.41 — and the one setting where the
-graph genuinely buys recall gives all of it back:
+graph genuinely bought recall gave all of it back:
 
 ```
                                      multi-hop r@10     MRR
@@ -192,6 +222,39 @@ graph genuinely buys recall gives all of it back:
 
 being two calls from a text match is barely evidence at all; on this corpus it
 is mostly `os.path`. it cost about a millisecond, and it is not in the code.
+
+## query expansion, measured and rejected
+
+the obvious fix for a one-word query is to make it longer: run it, mine the top
+few chunks for their most distinctive identifiers, add the best of them, run
+again. terms scored rm3-style — occurrences across the feedback chunks times
+idf, with the document frequencies read out of the fts5 vocabulary so the rarity
+is the one bm25 already believes in.
+
+```
+  16 one- and two-word queries         recall@1   MRR   ms/query
+  ---------------------------------------------------------------
+  no expansion                             0.75  0.802        26
+  +6 terms from 5 chunks                   0.44  0.568        56
+  +3 terms from 3 chunks, vectors only     0.81  0.823        56
+  +2 terms from 3 chunks, bm25 only        0.81  0.828        47
+  +2 terms, required in 2 chunks           0.88  0.919       108
+  the short-query blend instead            0.88  0.938        24
+```
+
+the failure is structural rather than a tuning miss. feedback comes from the
+ranking, so it can only amplify a ranking that was already right — and twelve of
+the sixteen were already at rank 1, where expansion has nothing to win and a page
+of near-misses to lose. the four with headroom are exactly the ones where the
+first pass is lost, so the terms it mines are lost too:
+
+```
+  mmap  -> _pydecimal.py, ElementTree.py   adds: logb, msd, magnitude
+  epoll -> colorsys.py, turtle.py          adds: color, spectrum, hue
+```
+
+the best expansion setting also cost the ordinary set, 0.850 → 0.814. what the
+sweep pointed at instead was the alpha, and that is what shipped.
 
 ## imports as a qualifier, measured and rejected
 
@@ -244,10 +307,10 @@ vector computed without ever seeing the query. on this corpus it does not:
 ```
                                     recall@1  recall@3  recall@10     MRR   per query
   -----------------------------------------------------------------------------------
-  no rerank                             0.81      0.89       0.92   0.850       0.04s
-  ms-marco-MiniLM-L-6-v2                0.72      0.86       0.94   0.804       1.7s
-  jina-reranker-v1-turbo-en             0.67      0.81       0.92   0.760       1.9s
-  jina-reranker-v2-base-multilingual    0.75      0.86       0.94   0.808      10.3s
+  no rerank                             0.83      0.92       0.92   0.870       0.04s
+  ms-marco-MiniLM-L-6-v2                0.72      0.89       0.94   0.814       1.7s
+  jina-reranker-v1-turbo-en             0.69      0.81       0.92   0.769       1.9s
+  jina-reranker-v2-base-multilingual    0.75      0.83       0.94   0.804      10.3s
 ```
 
 all three are trained on prose retrieval, and code is out of distribution for
@@ -263,8 +326,8 @@ fyc eval my_cases.json --rerank        # settle it on your corpus, not mine
 
 ## where the ceiling is
 
-recall@1 is 0.81, so roughly one query in five puts the right file below the
-top. the limit is the default model's 128-token window: it reads the name, the
+recall@1 is 0.83, so about one query in six puts the right file below the top.
+the limit is the default model's 128-token window: it reads the name, the
 docstring and the file summary, not the body. swap in
 `intfloat/multilingual-e5-large` or `voyage-code-3` and run the same eval on
 your own repository rather than trusting any of these numbers.

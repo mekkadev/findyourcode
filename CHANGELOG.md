@@ -38,6 +38,17 @@ notable changes, newest first. semver.
   the multi-hop set keeps recall@10 0.59 against 0.41 without the graph. costs one
   deeper read, 38ms → 45ms per query.
 
+- a query of one or two words gets its own blend: `short_query_alpha = 0.55`
+  instead of `alpha = 0.75`, on the reasoning that a sentence is ordinary english
+  the model reads well while `epoll` is one rare token bm25 has always had. worth
+  mrr 0.802 → 0.938 on a new 16-case set of short queries, and 0.850 → 0.870 on
+  the ordinary one, whose ten identifier cases reach mrr 1.000. long queries are
+  untouched — all 46 sentence-shaped queries in this repository return
+  byte-identical pages, file, line and score, with it on and off. costs nothing:
+  alpha is one multiplier applied after retrieval.
+- `examples/eval_oneword.json`, and a `default` row in `fyc eval --sweep` so the
+  rows around it have something to be read against.
+
 ### measured and not shipped
 
 - a second propagation hop. the premise holds — for 5 of the 17 multi-hop
@@ -48,6 +59,11 @@ notable changes, newest first. semver.
 - imports read into a name → module map, to settle a bare call to an imported
   name. eight of 1265 ambiguous references on the stdlib, zero on npm's own
   source, no eval number moved.
+- query expansion by pseudo-relevance feedback, the obvious fix for a one-word
+  query. feedback comes from the ranking, so it can only amplify a ranking that
+  was already right, and twelve of the sixteen short queries were already at rank
+  1. its best setting reached mrr 0.919 for +116% latency where the short-query
+  blend reaches 0.938 for free, and cost the ordinary set 0.850 → 0.814.
 
 both are in `docs/BENCHMARKS.md` with their tables. neither is in the code.
 
