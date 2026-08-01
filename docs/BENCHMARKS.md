@@ -117,8 +117,38 @@ turned out not to exist — `pickle` does not call `copyreg` by name, `inspect`
 does not call `dis` by name. none was dropped for scoring badly.
 
 of the 17, the gold module is reachable through the graph from the top-10 text
-results in 13. the remaining gap is selection, not extraction: a strong result
-calls twenty things and only five slots are given away.
+results in 13, and 8 make it onto the page. the gap is not extraction and it is
+not the number of slots either — `graph_limit` from 3 to 20 does not move either
+set by a single case. what binds is the score a graph-only chunk is allowed to
+have: capped at `graph_weight` and below the best direct answer, it can only
+displace text matches that are already scoring under 0.65. raising that cap is
+the one lever, and it is the trade in the table above.
+
+whether some cheaper signal could tell a right neighbour from a wrong one — is
+it corroborated by several results, is the name resolved or guessed, is it a
+callee or a caller — is measured in "what does not separate them" below.
+
+## imports as a qualifier, measured and rejected
+
+`linecache.getline(...)` says which of the four `getline` definitions is meant.
+`from linecache import getline` followed by a bare `getline(...)` says exactly
+the same thing one statement earlier, so reading the import statements into a
+name → module map should settle a pile of otherwise ambiguous calls. it settles
+almost none:
+
+```
+                          ambiguous cross-file calls   settled by a qualifier
+  ---------------------------------------------------------------------------
+  cpython stdlib, without the import map          1265                    118
+  cpython stdlib, with it                         1265                    126
+  npm's own source (110 js files), without         324                     95
+  npm's own source, with it                        324                     95
+```
+
+eight calls out of 1265, and not one eval number moved. javascript, where the
+pattern should have been strongest, gains nothing at all: npm is written in
+commonjs, so the imports are `require()` calls and never look like imports to a
+grammar. forty lines and a regex-based statement parser, deleted.
 
 ## asking in another language
 

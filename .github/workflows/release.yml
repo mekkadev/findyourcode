@@ -13,17 +13,30 @@ jobs:
     environment: pypi
     permissions:
       id-token: write # trusted publishing, no token in secrets
+      contents: write # the github release note
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
-      - run: pip install build twine
-      - run: python -m build
-      - run: twine check dist/*
       - name: the tag must match the version in pyproject (which the package reads at runtime)
         run: |
           tag="${GITHUB_REF_NAME#v}"
           version=$(python -c "import tomllib,pathlib; print(tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']['version'])")
           test "$tag" = "$version" || { echo "tag $tag != version $version"; exit 1; }
+      - run: pip install build twine
+      - run: python -m build
+      - run: twine check dist/*
       - uses: pypa/gh-action-pypi-publish@release/v1
+      - name: publish the changelog section as the release note
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python - <<'PY' > notes.md
+          import pathlib, re, os
+          tag = os.environ["GITHUB_REF_NAME"].lstrip("v")
+          text = pathlib.Path("CHANGELOG.md").read_text(encoding="utf-8")
+          found = re.search(rf"^## \[{re.escape(tag)}\].*?$(.*?)(?=^## \[|\Z)", text, re.S | re.M)
+          print((found.group(1).strip() if found else f"see CHANGELOG.md for {tag}"))
+          PY
+          gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file notes.md

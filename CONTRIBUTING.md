@@ -53,6 +53,25 @@ meaning queries and 10 identifier queries, and they disagree.
 - new languages come from `tree-sitter-language-pack`; add the extension and the
   definition node names in `languages.py`, with a test.
 
+## releasing
+
+versions are semver and the tag drives everything: `release.yml` refuses to
+publish a `vX.Y.Z` tag whose number disagrees with `pyproject.toml`, then builds,
+publishes to pypi through trusted publishing, and posts the changelog section for
+that version as the github release note.
+
+```bash
+# 1. bump the version in pyproject.toml and write the CHANGELOG section
+# 2. let ci go green on main
+git tag -a v0.4.0 -m "0.4.0" && git push origin v0.4.0
+```
+
+publishing needs a trusted publisher configured once at
+https://pypi.org/manage/project/findyourcode/settings/publishing — owner
+`mekkadev`, repository `findyourcode`, workflow `release.yml`, environment
+`pypi`. without it the tag builds and then fails at the upload step, so set it up
+before tagging rather than after.
+
 ## bugs
 
 open an issue with `fyc --version`, the provider and model, the exact command
