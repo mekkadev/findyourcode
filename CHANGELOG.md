@@ -49,6 +49,13 @@ notable changes, newest first. semver.
 - `examples/eval_oneword.json`, and a `default` row in `fyc eval --sweep` so the
   rows around it have something to be read against.
 
+- a third adversarial pass, on the two changes above: `-n 350` and up silently
+  turned the call graph off entirely, because the window is clamped at the vector
+  index's own limit and the page had grown until the two met; a repository
+  smaller than the window was treated as gated when the window excluded nothing;
+  and `fyc eval --sweep --alpha X` printed a row labelled `default` that was not
+  the default. all three fixed, each with the test that fails without it.
+
 ### measured and not shipped
 
 - a second propagation hop. the premise holds — for 5 of the 17 multi-hop

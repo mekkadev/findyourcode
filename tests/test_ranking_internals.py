@@ -310,3 +310,20 @@ def test_the_short_query_blend_leaves_long_queries_byte_identical(repo):
     assert before == after
     assert page("password") != []  # and the short query still answers
     store.close()
+
+
+def test_a_sweep_asked_for_one_alpha_does_not_claim_a_default_row(repo, capsys):
+    """`--alpha` turns the short-query blend off for the whole run, so there is no
+    row left that means "everything as shipped" — printing one would be a lie."""
+    from findyourcode import cli
+
+    root = repo({"auth/login.py": "def verify_password(login):\n    return login\n"})
+    cli.main(["-C", str(root), "--provider", "hash", "index", "-q"])
+    cases = root / "cases.json"
+    cases.write_text('[{"query": "verify password", "expect": "auth/login.py"}]', encoding="utf-8")
+    capsys.readouterr()
+
+    assert cli.main(["-C", str(root), "eval", str(cases), "--sweep"]) == 0
+    assert "default" in capsys.readouterr().out
+    assert cli.main(["-C", str(root), "eval", str(cases), "--sweep", "--alpha", "0.9"]) == 0
+    assert "default" not in capsys.readouterr().out

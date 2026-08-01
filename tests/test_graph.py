@@ -532,3 +532,38 @@ def test_without_a_reach_window_the_graph_stays_quiet(repo):
     store.close()
     assert hits["auth/session.py"].graph is not None
     assert hits["auth/session.py"].graph <= UNGATED_WEIGHT
+
+
+def test_a_large_page_does_not_silently_mute_the_graph(repo, monkeypatch):
+    """`-n 600` asks the vector index for 4800 and it will not answer past 4096, so
+    the window would have been no wider than the page — and every candidate outside
+    a page that wide is, by definition, already in it."""
+    from findyourcode.store import VEC_MAX_K
+
+    root = repo(FILES)
+    cfg, embedder, store = _index(root)
+    asked = []
+    real = store.search_vector
+    monkeypatch.setattr(store, "search_vector", lambda v, k, f: (asked.append(k), real(v, k, f))[1])
+
+    hits = search(store, embedder, QUERY, cfg, limit=600, mode="lexical")
+    store.close()
+    assert all(k <= VEC_MAX_K for k in asked)
+    assert [h.row.rel for h in hits if h.graph is not None] == ["auth/session.py"]
+
+
+def test_a_corpus_smaller_than_the_window_is_not_a_gated_one(repo):
+    """Every chunk being 'near the query' is not evidence about any of them, so the
+    graph goes back to the weight it was measured safe at without a gate."""
+    from findyourcode.search import UNGATED_WEIGHT
+
+    files = {f"filler/mod{i}.py": f"def helper{i}(x):\n    return {i}\n" for i in range(120)}
+    files["hub.py"] = 'def dispatch(x):\n    """the login form entry point."""\n    helper7(x)\n'
+    root = repo(files)
+    cfg, embedder, store = _index(root)
+    cfg.graph_weight = 0.95
+
+    hits = search(store, embedder, "login form entry point", cfg, mode="lexical")
+    store.close()
+    reached = [h for h in hits if h.graph is not None]
+    assert reached and all(h.graph <= UNGATED_WEIGHT for h in reached)

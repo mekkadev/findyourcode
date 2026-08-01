@@ -347,8 +347,11 @@ def cmd_eval(args) -> int:
             )
         )
         cfg.short_query_alpha = tilt
-        # Everything as shipped, so the rows around it have something to be read against.
-        rows.append(("default", evaluate(store, embedder, cfg, cases, args.limit)))
+        if args.alpha is None:
+            # Everything as shipped, so the rows around it have something to be read
+            # against. With `--alpha` there is no such row to print: the run was asked
+            # for one particular alpha, which is not what the project ships.
+            rows.append(("default", evaluate(store, embedder, cfg, cases, args.limit)))
         for mode in ("semantic", "lexical"):
             rows.append(
                 (

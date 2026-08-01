@@ -15,7 +15,7 @@ import numpy as np
 
 from .config import Config
 from .embeddings import Embedder
-from .store import Edge, Filters, Row, Store
+from .store import VEC_MAX_K, Edge, Filters, Row, Store
 
 
 @dataclass
@@ -80,10 +80,21 @@ def search(
             # One list, read twice: the head of it is the dense ranking as before, and
             # the tail is only ever consulted to ask whether a call-graph neighbour is
             # somewhere the query points at all. See `_propagate`.
-            reach = depth * cfg.graph_reach if use_graph and cfg.graph_reach > 1 else depth
+            reach = depth
+            if use_graph and cfg.graph_reach > 1:
+                # `-n 600` already asks for 4800 and the vector index will not answer
+                # past VEC_MAX_K, so a window computed from it would be barely wider
+                # than the page — which is to say no window at all. Better to say so
+                # and let the graph argue quietly than to leave it silently mute.
+                widest = min(depth * cfg.graph_reach, VEC_MAX_K)
+                reach = widest if widest >= depth * 2 else depth
             dense = store.search_vector(query_vector, reach, filters)
             if reach > depth:
-                near = {cid for cid, _ in dense}
+                # A window is only a gate if it left something out. On a corpus smaller
+                # than the window every chunk is near the query, and calling that gated
+                # would hand the graph a loud weight on the strength of nothing.
+                if len(dense) >= reach:
+                    near = {cid for cid, _ in dense}
                 dense = dense[:depth]
     if mode in ("hybrid", "lexical"):
         sparse = store.search_lexical(query, depth, filters)

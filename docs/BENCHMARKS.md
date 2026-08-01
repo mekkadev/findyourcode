@@ -115,8 +115,9 @@ identical to `default`, question for question. that is by construction: a chunk
 reached through the graph enters the page below the best direct answer and never
 above it, at most five join a page, and one that the query ranks nowhere at all
 is dropped however loudly the structure argues for it. the text results keep
-their order and their scores exactly; the one thing a graph row does take from
-them is a slot under the per-file cap, which counts it like any other result.
+their order and their scores to every decimal the output prints; the one thing a
+graph row does take from them is a slot under the per-file cap, which counts it
+like any other result.
 
 **multi-hop questions.** `examples/eval_multihop.json` — 17 questions whose
 answer is a module one call away from the module the question describes.
@@ -186,8 +187,15 @@ the default is 0.85 and the multi-hop set keeps the whole gain.
 it costs one deeper read, 29ms → 41ms per query, and it is not free of misses
 either: 12 of the 17 multi-hop questions have their gold module among the graph
 candidates and 4 of those sit outside the window, at rank 635, 640, 970 and
-1417. widening it lets the damaging ones back in. `--mode lexical` embeds
-nothing, so no window can exist there and the graph goes back to arguing at 0.65.
+1417. widening it lets the damaging ones back in.
+
+a window has to be able to leave something out to be worth anything, and twice
+there is nothing it can leave out: `--mode lexical` embeds nothing, and a
+repository smaller than the window has every chunk inside it. `-n 350` is the
+same situation from the other end — the page has grown until the window is
+barely wider than it. in all three the graph goes back to arguing at the 0.65 it
+was measured safe at without a gate, rather than pretending to a gate it does
+not have.
 
 ## a second hop, measured and rejected
 
