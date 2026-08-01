@@ -114,7 +114,9 @@ disturb ordinary queries, and it must find things text cannot.
 identical to `default`, question for question. that is by construction: a chunk
 reached through the graph enters the page below the best direct answer and never
 above it, at most five join a page, and one that the query ranks nowhere at all
-is dropped however loudly the structure argues for it.
+is dropped however loudly the structure argues for it. the text results keep
+their order and their scores exactly; the one thing a graph row does take from
+them is a slot under the per-file cap, which counts it like any other result.
 
 **multi-hop questions.** `examples/eval_multihop.json` — 17 questions whose
 answer is a module one call away from the module the question describes.

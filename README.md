@@ -89,7 +89,7 @@ neighbour the query ranks nowhere at all is dropped however loudly the structure
 argues for it.
 
 that gate is what makes it free: on ordinary queries the ranking is not merely
-close but identical, question for question — mrr 0.850 with the graph and
+close but identical, question for question — mrr 0.870 with the graph and
 without it. on questions whose answer lives one call away, ten results find what
 text alone needs twenty to find. both claims are one command each, in
 [benchmarks](https://github.com/mekkadev/findyourcode/blob/main/docs/BENCHMARKS.md).
